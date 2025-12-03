@@ -1,5 +1,6 @@
 import numpy as np
 
+from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from sklearn.base import BaseEstimator, ClassifierMixin
 from typing import Literal, Self
@@ -11,6 +12,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
     ----------
     solver : {'newton-raphson', 'irls', 'lbfgs'}, default='newton-raphson'
     max_iter : int, default=25
+        Maximum number of iterations
     max_step : float, default=5.0
         Maximum step size per coefficient (Newton-Raphson only)
     max_halfstep : int, default=25
@@ -35,9 +37,10 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
     converged_ : bool
         Whether the solver converged within `max_iter`.
     """
+
     def __init__(
         self,
-        solver: Literal['newton-raphson', 'irls', 'lbfgs'] = 'newton-raphson',
+        solver: Literal["newton-raphson", "irls", "lbfgs"] = "newton-raphson",
         max_iter: int = 25,
         max_step: float = 5.0,
         max_halfstep: int = 25,
@@ -58,7 +61,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         sample_weight: ArrayLike | None = None,
     ) -> Self:
         return self
-    
+
     def predict(
         self,
         X: ArrayLike,
@@ -82,3 +85,14 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         X: ArrayLike,
     ) -> NDArray[np.float64]:
         pass
+
+
+@dataclass
+class LogisticQuantities:
+    """Quantities needed for one Newton-Raphson iteration"""
+
+    loglik: float
+    modified_score: NDArray[
+        np.float64
+    ]  # (n_features,) U* = X'[w*(y - p) + h*(0.5 - p)]
+    fisher_info: NDArray[np.float64]  # (n_features, n_features) X'WX
