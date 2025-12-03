@@ -1,5 +1,9 @@
+import scipy
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
+from sklearn.exceptions import ConvergenceWarning
 from typing import Callable
 
 from firthmodels._utils import FirthResult
@@ -50,3 +54,45 @@ def newton_raphson(
                 n_iter=iteration,
                 converged=True,
             )
+
+        # solve for step: delta = (X'WX)^(-1) @ U*
+        try:
+            cho = scipy.linalg.cho_factor(q.fisher_info)
+            delta = scipy.linalg.cho_solve(cho, q.modified_score)
+        except scipy.linalg.LinAlgError:
+            # cholesky fail, fisher_info is singular or not positive definite
+            # fall back to np.linalg.lstsq
+            delta, *_ = np.linalg.lstsq(q.fisher_info, q.modified_score, rcond=None)
+
+        # restrict to max_stepsize
+        max_delta = np.max(np.abs(delta))
+        if max_delta > max_step:
+            delta = delta * (max_step / max_delta)
+
+        # step-halving until loglik increases (deviance decreases)
+        step_factor = 1.0
+        for _ in range(max_halfstep):
+            beta_new = beta + step_factor * delta
+            q_new = compute_quantities(beta_new)
+
+            if q_new.loglik >= q.loglik:
+                beta = beta_new
+                break
+            step_factor *= 0.5
+        else:  # step-halving failed
+            warning_msg = "Step-halving failed to converge."
+            warnings.warn(warning_msg, ConvergenceWarning, stacklevel=2)
+            beta = beta + step_factor * delta
+
+    # max_iter reached without convergence
+    q = compute_quantities(beta)
+    warning_msg = "Maximum number of iterations reached without convergence."
+    warnings.warn(warning_msg, ConvergenceWarning, stacklevel=2)
+
+    return FirthResult(
+        beta=beta,
+        loglik=q.loglik,
+        fisher_info=q.fisher_info,
+        n_iter=max_iter,
+        converged=False,
+    )
