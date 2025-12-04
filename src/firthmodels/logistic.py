@@ -8,12 +8,15 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import validate_data
 from typing import Literal, Self
 
+from firthmodels._solvers import newton_raphson
+
 
 class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
     """
     Parameters
     ----------
-    solver : {'newton-raphson', 'irls', 'lbfgs'}, default='newton-raphson'
+    solver : {'newton-raphson'}, default='newton-raphson'
+        Optimization algorithm. Only 'newton-raphson' is currently supported.
     max_iter : int, default=25
         Maximum number of iterations
     max_step : float, default=5.0
@@ -43,7 +46,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
 
     def __init__(
         self,
-        solver: Literal["newton-raphson", "irls", "lbfgs"] = "newton-raphson",
+        solver: Literal["newton-raphson"] = "newton-raphson",
         max_iter: int = 25,
         max_step: float = 5.0,
         max_halfstep: int = 25,
@@ -63,6 +66,45 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         y: ArrayLike,
         sample_weight: ArrayLike | None = None,
     ) -> Self:
+        X, y = self._validate_input(X, y)
+        sample_weight = (
+            np.ones(X.shape[0], dtype=np.float64)
+            if sample_weight is None
+            else np.asarray(sample_weight, dtype=np.float64)
+        )
+
+        if self.fit_intercept:
+            X = np.column_stack([X, np.ones(X.shape[0])])
+
+        n_features = X.shape[1]
+
+        def compute_quantities(beta):
+            return compute_logistic_quantities(
+                X=X,
+                y=y,
+                beta=beta,
+                sample_weight=sample_weight,
+            )
+
+        result = newton_raphson(
+            compute_quantities=compute_quantities,
+            n_features=n_features,
+            max_iter=self.max_iter,
+            max_step=self.max_step,
+            max_halfstep=self.max_halfstep,
+            tol=self.tol,
+        )
+
+        if self.fit_intercept:
+            self.coef_ = result.beta[:-1]
+            self.intercept_ = result.beta[-1]
+        else:
+            self.coef_ = result.beta
+            self.intercept_ = 0.0
+
+        self.loglik_ = result.loglik
+        self.n_iter_ = result.n_iter
+        self.converged_ = result.converged
         return self
 
     def predict(
@@ -89,7 +131,14 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
     ) -> NDArray[np.float64]:
         pass
 
-    def _validate_input(self, X, y):
+    def _validate_input(
+        self, X: ArrayLike, y: ArrayLike
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        if self.solver != "newton-raphson":
+            raise ValueError(
+                f"solver='{self.solver}' is not supported. "
+                "Only 'newton-raphson' is currently implemented."
+            )
         if self.max_iter <= 0:
             raise ValueError(f"max_iter must be positive, got {self.max_iter}")
         if self.max_halfstep < 0:
@@ -132,9 +181,6 @@ def compute_logistic_quantities(
     sample_weight: NDArray[np.float64] | None = None,
 ) -> LogisticQuantities:
     """Compute all quantities needed for one Newton-Raphson iteration."""
-    if sample_weight is None:
-        sample_weight = np.ones(X.shape[0], dtype=np.float64)
-
     eta = X @ beta
     p = expit(eta)
 
