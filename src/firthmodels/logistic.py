@@ -66,6 +66,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         y: ArrayLike,
         sample_weight: ArrayLike | None = None,
     ) -> Self:
+        # === Validate and prep inputs ===
         X, y = self._validate_input(X, y)
         sample_weight = (
             np.ones(X.shape[0], dtype=np.float64)
@@ -78,6 +79,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
 
         n_features = X.shape[1]
 
+        # === run solver ===
         def compute_quantities(beta):
             return compute_logistic_quantities(
                 X=X,
@@ -95,6 +97,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
             tol=self.tol,
         )
 
+        # === Extract coefficients ===
         if self.fit_intercept:
             self.coef_ = result.beta[:-1]
             self.intercept_ = result.beta[-1]
@@ -105,6 +108,24 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         self.loglik_ = result.loglik
         self.n_iter_ = result.n_iter
         self.converged_ = result.converged
+
+        # === Wald ===
+        try:
+            cov = np.linalg.inv(result.fisher_info)
+            bse = np.sqrt(np.diag(cov))
+        except np.linalg.LinAlgError:
+            bse = np.full_like(result.beta, np.nan)
+
+        z = result.beta / bse
+        pvalues = 2 * scipy.stats.norm.sf(np.abs(z))
+
+        if self.fit_intercept:
+            self.bse_, self.intercept_bse_ = bse[:-1], bse[-1]
+            self.pvalues_, self.intercept_pvalue_ = pvalues[:-1], pvalues[-1]
+        else:
+            self.bse_ = bse
+            self.pvalues_ = pvalues
+
         return self
 
     def predict(
@@ -207,6 +228,12 @@ def compute_logistic_quantities(
             logdet = -np.inf
     h = np.sum(solved * XtW, axis=0)
 
+    # augmented fisher information
+    w_aug = (sample_weight + h) * p * (1 - p)
+    sqrt_w_aug = np.sqrt(w_aug)
+    XtW_aug = X.T * sqrt_w_aug
+    fisher_info_aug = XtW_aug @ XtW_aug.T
+
     # L*(β) = Σ weight_i * [y_i*log(p_i) + (1-y_i)*log(1-p_i)] + 0.5*log|I(β)|
     loglik = (
         np.sum(sample_weight * (y * np.log(p) + (1 - y) * np.log(1 - p))) + 0.5 * logdet
@@ -219,5 +246,5 @@ def compute_logistic_quantities(
     return LogisticQuantities(
         loglik=loglik,
         modified_score=modified_score,
-        fisher_info=fisher_info,
+        fisher_info=fisher_info_aug,
     )
