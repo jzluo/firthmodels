@@ -128,33 +128,43 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
 
         return self
 
-    def predict(
+    def decision_function(
         self,
         X: ArrayLike,
-    ) -> NDArray[np.int_]:
-        pass
+    ) -> NDArray[np.float64]:
+        """Return linear predictor."""
+        X = validate_data(self, X, dtype=np.float64, reset=False)
+        X = cast(NDArray[np.float64], X)  # for mypy
+        return X @ self.coef_ + self.intercept_
 
     def predict_proba(
         self,
         X: ArrayLike,
     ) -> NDArray[np.float64]:
-        pass
+        """Return class probabilities."""
+        scores = self.decision_function(X)
+        p1 = expit(scores)
+        return np.column_stack([1 - p1, p1])
+
+    def predict(
+        self,
+        X: ArrayLike,
+    ) -> NDArray[np.int_]:
+        """Return predicted class labels."""
+        proba = self.predict_proba(X)
+        return self.classes_[np.argmax(proba, axis=1)]
 
     def predict_log_proba(
         self,
         X: ArrayLike,
     ) -> NDArray[np.float64]:
-        pass
-
-    def decision_function(
-        self,
-        X: ArrayLike,
-    ) -> NDArray[np.float64]:
-        pass
+        """Return log class probabilities"""
+        return np.log(self.predict_proba(X))
 
     def _validate_input(
         self, X: ArrayLike, y: ArrayLike
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Validate parameters and inputs, encode y to 0/1"""
         if self.solver != "newton-raphson":
             raise ValueError(
                 f"solver='{self.solver}' is not supported. "
