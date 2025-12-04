@@ -12,10 +12,20 @@ class TestFirthLogisticRegression:
         model = FirthLogisticRegression()
         model.fit(X, y)
 
+        # coefficients
         expected_intercept = -0.4434563
         expected_coef = np.array([3.6577140, 0.6759782, -0.8633120, 0.3385789])
+
+        # Wald
+        expected_intercept_wald_bse = 0.3452907
+        expected_wald_bse = np.array([1.4822786, 0.2687886, 0.3874454, 0.1370779])
+
         np.testing.assert_allclose(model.intercept_, expected_intercept, rtol=1e-4)
         np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-4)
+        np.testing.assert_allclose(
+            model.intercept_bse_, expected_intercept_wald_bse, rtol=1e-4
+        )
+        np.testing.assert_allclose(model.bse_, expected_wald_bse, rtol=1e-4)
         assert model.converged_
 
     def test_fit_intercept_false(self, separation_data):
