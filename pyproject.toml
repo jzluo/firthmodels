@@ -35,3 +35,6 @@ exclude=[
     "build",
     "dist"
 ]
+
+[tool.mypy]
+ignore_missing_imports = true
