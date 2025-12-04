@@ -60,8 +60,6 @@ def newton_raphson(
             cho = scipy.linalg.cho_factor(q.fisher_info)
             delta = scipy.linalg.cho_solve(cho, q.modified_score)
         except scipy.linalg.LinAlgError:
-            # cholesky fail, fisher_info is singular or not positive definite
-            # fall back to np.linalg.lstsq
             delta, *_ = np.linalg.lstsq(q.fisher_info, q.modified_score, rcond=None)
 
         # restrict to max_stepsize
