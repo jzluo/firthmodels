@@ -6,7 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import validate_data
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 from firthmodels._solvers import newton_raphson
 
@@ -181,6 +181,8 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         # encode y to 0/1
         y = (y == self.classes_[1]).astype(np.float64)
 
+        X = cast(NDArray[np.float64], X)  # for mypy
+        y = cast(NDArray[np.float64], y)
         return X, y
 
 
