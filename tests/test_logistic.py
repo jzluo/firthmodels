@@ -14,9 +14,8 @@ class TestFirthLogisticRegression:
 
         expected_intercept = -0.4434563
         expected_coef = np.array([3.6577140, 0.6759782, -0.8633120, 0.3385789])
-
-        np.testing.assert_allclose(model.intercept_, expected_intercept, rtol=1e-3)
-        np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-3)
+        np.testing.assert_allclose(model.intercept_, expected_intercept, rtol=1e-4)
+        np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-4)
         assert model.converged_
 
     def test_fit_intercept_false(self, separation_data):
