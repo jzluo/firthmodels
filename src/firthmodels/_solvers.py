@@ -6,11 +6,11 @@ from numpy.typing import NDArray
 from sklearn.exceptions import ConvergenceWarning
 from typing import Callable
 
-from firthmodels._utils import FirthResult
+from firthmodels._utils import FirthResult, IterationQuantities
 
 
 def newton_raphson(
-    compute_quantities: Callable[[NDArray]],
+    compute_quantities: Callable[[NDArray], IterationQuantities],
     n_features: int,
     max_iter: int = 25,
     max_step: float = 5.0,
