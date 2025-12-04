@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.validation import validate_data
 from typing import Literal, Self
 
 
@@ -87,6 +88,30 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         X: ArrayLike,
     ) -> NDArray[np.float64]:
         pass
+
+    def _validate_input(self, X, y):
+        if self.max_iter <= 0:
+            raise ValueError(f"max_iter must be positive, got {self.max_iter}")
+        if self.max_halfstep < 0:
+            raise ValueError(
+                f"max_halfstep must be non-negative, got {self.max_halfstep}"
+            )
+        if self.tol < 0:
+            raise ValueError(f"tol must be non-negative, got {self.tol}")
+        X, y = validate_data(
+            self, X, y, dtype=np.float64, y_numeric=True, ensure_min_samples=2
+        )
+
+        self.classes_ = np.unique(y)
+        if len(self.classes_) != 2:
+            raise ValueError(
+                f"Got {len(self.classes_)} classes. Only binary classification is supported."
+            )
+
+        # encode y to 0/1
+        y = (y == self.classes_[1]).astype(np.float64)
+
+        return X, y
 
 
 @dataclass
