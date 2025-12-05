@@ -42,6 +42,14 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         Number of iterations the solver ran.
     converged_ : bool
         Whether the solver converged within `max_iter`.
+    bse_: ndarray of shape (n_features,)
+        Wald standard errors for the coefficient estimates.
+    intercept_bse_ : float
+        Wald standard error for the intercept.
+    pvalues_ : ndarray of shape (n_features,)
+        Wald p-values for the coefficients.
+    intercept_pvalue_ : float
+        Wald p-value for the intercept.
     """
 
     def __init__(
