@@ -136,6 +136,25 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
 
         return self
 
+    def conf_int(self, alpha: float = 0.05) -> NDArray[np.float64]:
+        """
+        Wald confidence intervals for the coefficients.
+
+        Parameters
+        ----------
+        alpha : float, default=0.05
+            Significance level (default 0.05 for 95% CI)
+
+        Returns
+        -------
+        ndarray, shape(n_features, 2)
+            Column 0: lower bounds, Column 1: upper bounds
+        """
+        z = scipy.stats.norm.ppf(1 - alpha / 2)
+        lower = self.coef_ - z * self.bse_
+        upper = self.coef_ + z * self.bse_
+        return np.column_stack([lower, upper])
+
     def decision_function(
         self,
         X: ArrayLike,
