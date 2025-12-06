@@ -6,13 +6,13 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils._tags import Tags, ClassifierTags
-from sklearn.utils.validation import validate_data
+from sklearn.utils.validation import check_is_fitted, validate_data
 from typing import Literal, Self, cast
 
 from firthmodels._solvers import newton_raphson
 
 
-class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
+class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
     """
     Parameters
     ----------
@@ -167,6 +167,7 @@ class FirthLogisticRegression(BaseEstimator, ClassifierMixin):
         X: ArrayLike,
     ) -> NDArray[np.float64]:
         """Return linear predictor."""
+        check_is_fitted(self)
         X = validate_data(self, X, dtype=np.float64, reset=False)
         X = cast(NDArray[np.float64], X)  # for mypy
         return X @ self.coef_ + self.intercept_
