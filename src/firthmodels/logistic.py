@@ -167,6 +167,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         else:
             self.bse_ = bse
             self.pvalues_ = pvalues
+            self.intercept_bse_ = np.nan
+            self.intercept_pvalue_ = np.nan
 
         return self
 
