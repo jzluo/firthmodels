@@ -6,9 +6,9 @@ readme = "README.md"
 authors = [
     { name = "Jon Luo", email = "20971593+jzluo@users.noreply.github.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
-    "numpy>=2.0",
+    "numpy>=1.24",
     "scikit-learn>=1.6",
     "scipy>=1.12",
 ]
@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "mypy>=1.19.0",
-    "pandas>=2.1.1",
+    "pandas>=1.5.3",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
