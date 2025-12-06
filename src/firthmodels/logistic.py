@@ -15,6 +15,15 @@ from firthmodels._solvers import newton_raphson
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
     """
+    Logistic regression with Firth's bias reduction method.
+
+    This estimator fits a logistic regression model with Firth's bias-reduction
+    penalty, which helps to mitigate small-sample bias and the problems caused
+    by (quasi-)complete separation. In such cases, standard maximum-likelihood
+    logistic regression can produce infinite (or extremely large) coefficient
+    estimates, whereas Firth logistic regression yields finite, well-behaved
+    estimates.
+
     Parameters
     ----------
     solver : {'newton-raphson'}, default='newton-raphson'
@@ -56,6 +65,28 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Number of features seen during `fit`.
     feature_names_in_ : ndarray of shape (n_features_in_,)
         Names of features seen during `fit`. Defined only when X has feature names that are all strings.
+
+    References
+    ----------
+    Firth D (1993). Bias reduction of maximum likelihood estimates.
+    Biometrika 80, 27–38.
+
+    Heinze G, Schemper M (2002). A solution to the problem of separation in logistic
+    regression. Statistics in Medicine 21: 2409-2419.
+
+    Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
+    quantitative and binary traits. Nature Genetics 53, 1097–1103.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from firthmodels import FirthLogisticRegression
+    >>> # x=1 perfectly predicts y=1 (separated data)
+    >>> X = np.array([[0], [0], [0], [1], [1], [1]])
+    >>> y = np.array([0, 0, 0, 1, 1, 1])
+    >>> model = FirthLogisticRegression().fit(X, y)
+    >>> model.coef_
+    array([3.89181893])
     """
 
     def __init__(
