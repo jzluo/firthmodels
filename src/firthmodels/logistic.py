@@ -52,6 +52,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Wald p-values for the coefficients.
     intercept_pvalue_ : float
         Wald p-value for the intercept.
+    n_features_in_ : int
+        Number of features seen during `fit`.
+    feature_names_in_ : ndarray of shape (n_features_in_,)
+        Names of features seen during `fit`. Defined only when X has feature names that are all strings.
     """
 
     def __init__(
