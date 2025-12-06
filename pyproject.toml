@@ -20,7 +20,22 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "mypy>=1.19.0",
+    "pandas>=2.0",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
 ]
+
+[tool.ruff]
+line-length = 88
+exclude=[
+    ".eggs",
+    ".git",
+    ".vscode",
+    "__pycache__",
+    "build",
+    "dist"
+]
+
+[tool.mypy]
+ignore_missing_imports = true

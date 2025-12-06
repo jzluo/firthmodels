@@ -1,2 +1,5 @@
-def hello() -> str:
-    return "Hello from firthmodels!"
+from firthmodels.logistic import FirthLogisticRegression
+
+__all__ = [
+    "FirthLogisticRegression",
+]
