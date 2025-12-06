@@ -29,8 +29,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: "3.12"
+          - python-version: "3.11"
             uv-args: "--resolution lowest-direct"
+          - python-version: "3.12"
+            uv-args: ""
           - python-version: "3.13"
             uv-args: ""
           - python-version: "3.14"
