@@ -83,6 +83,25 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         sample_weight: ArrayLike | None = None,
         offset: ArrayLike | None = None,
     ) -> Self:
+        """
+        Fit the Firth logistic regression model.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        y : array-like of shape (n_samples,)
+            Target labels.
+        sample_weight : array-like of shape (n_samples,), default=None
+            Array of weights that are assigned to individual samples. If not provided, then each sample is given unit weight.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to linear predictor.
+
+        Returns
+        -------
+        self : FirthLogisticRegression
+            Fitted estimator.
+        """
         # === Validate and prep inputs ===
         X, y = self._validate_input(X, y)
         sample_weight = (
