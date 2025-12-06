@@ -6,6 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils._tags import Tags, ClassifierTags
+from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted, validate_data
 from typing import Literal, Self, cast
 
@@ -214,8 +215,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         if self.tol < 0:
             raise ValueError(f"tol must be non-negative, got {self.tol}")
         X, y = validate_data(
-            self, X, y, dtype=np.float64, y_numeric=True, ensure_min_samples=2
+            self, X, y, dtype=np.float64, y_numeric=False, ensure_min_samples=2
         )
+
+        y_type = type_of_target(y)
+        if y_type == "continuous":
+            raise ValueError(
+                "Unknown label type: continuous. Only binary classification is supported."
+            )
 
         self.classes_ = np.unique(y)
         if len(self.classes_) != 2:
