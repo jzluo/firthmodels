@@ -81,6 +81,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         X: ArrayLike,
         y: ArrayLike,
         sample_weight: ArrayLike | None = None,
+        offset: ArrayLike | None = None,
     ) -> Self:
         # === Validate and prep inputs ===
         X, y = self._validate_input(X, y)
@@ -88,6 +89,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             np.ones(X.shape[0], dtype=np.float64)
             if sample_weight is None
             else np.asarray(sample_weight, dtype=np.float64)
+        )
+        offset = (
+            np.zeros(X.shape[0], dtype=np.float64)
+            if offset is None
+            else np.asarray(offset, dtype=np.float64)
         )
 
         if self.fit_intercept:
@@ -102,6 +108,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 y=y,
                 beta=beta,
                 sample_weight=sample_weight,
+                offset=offset,
             )
 
         result = newton_raphson(
@@ -253,10 +260,11 @@ def compute_logistic_quantities(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
     beta: NDArray[np.float64],
-    sample_weight: NDArray[np.float64] | None = None,
+    sample_weight: NDArray[np.float64],
+    offset: NDArray[np.float64],
 ) -> LogisticQuantities:
     """Compute all quantities needed for one Newton-Raphson iteration."""
-    eta = X @ beta
+    eta = X @ beta + offset
     p = expit(eta)
 
     # W = diag(weights * p * (1-p))
