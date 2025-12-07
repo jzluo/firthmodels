@@ -263,6 +263,43 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         >>> model.lrt_pvalues_
         array([0.000208, np.nan, 0.023639, np.nan])
         """
+        check_is_fitted(self)
+
+        # normalize input to a list of indices
+        n_coef = len(self.coef_)
+        if features is None:
+            indices = list(range(n_coef))
+            if self.fit_intercept:
+                indices.append(n_coef)  # intercept index
+
+        elif isinstance(features, (int, np.integer)):
+            indices = [features]
+
+        elif isinstance(features, str):
+            if features == "intercept":
+                indices = [n_coef]
+            else:
+                indices = [self._feature_name_to_index(features)]
+
+        else:  # sequence of int or str
+            indices = []
+            for feat in features:
+                if isinstance(feat, str):
+                    if feat == "intercept":
+                        indices.append(n_coef)
+                    else:
+                        indices.append(self._feature_name_to_index(feat))
+                elif isinstance(feat, (int, np.integer)):
+                    indices.append(feat)
+
+        # compute LRT
+        for idx in indices:
+            if idx == n_coef:  # intercept
+                if np.isnan(self.intercept_lrt_pvalue_):
+                    self._compute_single_lrt(idx)
+            else:
+                if np.isnan(self.lrt_pvalues_[idx]):
+                    self._compute_single_lrt(idx)
         return self
 
     def decision_function(
