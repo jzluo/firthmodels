@@ -281,19 +281,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             indices = list(range(n_coef))
             if self.fit_intercept:
                 indices.append(n_coef)  # intercept index
-
-        elif isinstance(features, (int, np.integer)):
-            indices = [features]
-
-        elif isinstance(features, str):
-            if features == "intercept":
-                indices = [n_coef]
-            else:
-                indices = [self._feature_name_to_index(features)]
-
-        else:  # sequence of int or str
+        else:
+            features_seq = (
+                [features] if isinstance(features, (int, np.integer, str)) else features
+            )
             indices = []
-            for feat in features:
+            for feat in features_seq:
                 if isinstance(feat, str):
                     if feat == "intercept":
                         indices.append(n_coef)
@@ -301,6 +294,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                         indices.append(self._feature_name_to_index(feat))
                 elif isinstance(feat, (int, np.integer)):
                     indices.append(feat)
+                else:
+                    raise TypeError(
+                        f"Elements of `features` must be int or str, but got {type(feat)}"
+                    )
 
         if n_coef in indices and not self.fit_intercept:
             raise ValueError("Cannot test intercept when fit_intercept=False")
