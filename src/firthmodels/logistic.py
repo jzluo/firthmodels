@@ -327,15 +327,25 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             raise KeyError(f"Unknown feature: '{name}'") from None
 
     def _compute_single_lrt(self, idx: int) -> None:
+        """
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value.
+        Also computes a back-corrected SE: |β|/√χ², as in regenie. This ensures
+        (β/SE)² = χ², making the SE consistent with the LRT p-value. Useful for
+        meta-analysis where studies are weighted by 1/SE².
+
+        Parameters
+        ----------
+        idx : int
+            Index of the coefficient to test. Use len(coef_) for the intercept.
+        """
         X, y, sample_weight, offset = self._fit_data
 
         # fit all indices except for the feature being tested
         free_indices = [i for i in range(X.shape[1]) if i != idx]
 
-        # We wrap the objective function so that the solver only optimizes the k-1
-        # "free" parameters.
-        # The objective function reconstructs the full k-parameter vector
-        # and computes the penalty using the full kxk Fisher information matrix.
+        # Wrapper so the solver only optimizes the k-1 "free" parameters.
+        # Reconstructs full k-vector, computes quantities with full Fisher,
+        # then slices score and Fisher to k-1 dimensions before returning to the solver.
         def constrained_quantities(beta_free):
             beta_full = np.insert(beta_free, idx, 0.0)
             q = compute_logistic_quantities(X, y, beta_full, sample_weight, offset)
