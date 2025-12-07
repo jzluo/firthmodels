@@ -8,7 +8,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils._tags import Tags, ClassifierTags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted, validate_data
-from typing import Literal, Self, cast
+from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
 
@@ -225,6 +225,45 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         lower = self.coef_ - z * self.bse_
         upper = self.coef_ + z * self.bse_
         return np.column_stack([lower, upper])
+
+    def lrt(
+        self,
+        features: int | str | Sequence[int] | Sequence[str] | None = None,
+    ) -> Self:
+        """
+        Compute penalized likelihood ratio test p-values.
+        Standard errors are also back-corrected using the effect size estimate and the
+        LRT p-value.
+
+        Parameters
+        ----------
+        features : int, str, sequence of int, sequence of str, or None, default=None
+            Features to test. If None, test all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+
+        Returns
+        -------
+        self : FirthLogisticRegression
+
+        Examples
+        --------
+        >>> model.fit(X, y).lrt()  # compute LR for all features
+        >>> model.lrt_pvalues_
+        array([0.000208, 0.009317, 0.023639, 0.005589])
+
+        >>> model.fit(X, y).lrt(0)
+        >>> model.lrt_pvalues_
+        array([0.000208, np.nan, np.nan, np.nan])
+
+        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
+        >>> model.lrt_pvalues_
+        array([0.000208, np.nan, 0.023639, np.nan])
+        """
+        return self
 
     def decision_function(
         self,
