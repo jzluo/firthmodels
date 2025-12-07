@@ -242,7 +242,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         """
         Compute penalized likelihood ratio test p-values.
         Standard errors are also back-corrected using the effect size estimate and the
-        LRT p-value.
+        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
+        by 1/SE².
 
         Parameters
         ----------
@@ -262,15 +263,15 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         --------
         >>> model.fit(X, y).lrt()  # compute LR for all features
         >>> model.lrt_pvalues_
-        array([0.000208, 0.009317, 0.023639, 0.005589])
-
+        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
+        >>> model.lrt_bse_
+        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
         >>> model.fit(X, y).lrt(0)
         >>> model.lrt_pvalues_
-        array([0.000208, np.nan, np.nan, np.nan])
-
+        array([0.00020841,        nan,        nan,        nan])
         >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
         >>> model.lrt_pvalues_
-        array([0.000208, np.nan, 0.023639, np.nan])
+        array([0.00020841,        nan, 0.02363857,        nan])
         """
         check_is_fitted(self)
 
@@ -328,10 +329,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     def _compute_single_lrt(self, idx: int) -> None:
         """
-        Fit constrained model with `beta[idx]=0` and compute LRT p-value.
-        Also computes a back-corrected SE: |β|/√χ², as in regenie. This ensures
-        (β/SE)² = χ², making the SE consistent with the LRT p-value. Useful for
-        meta-analysis where studies are weighted by 1/SE².
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
+        back-corrected standard error.
 
         Parameters
         ----------
