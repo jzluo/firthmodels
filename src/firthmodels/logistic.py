@@ -205,6 +205,15 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             self.intercept_bse_ = np.nan
             self.intercept_pvalue_ = np.nan
 
+        # need these for LRT
+        self._fit_data = (X, y, sample_weight, offset)  # X includes intercept column
+
+        self.lrt_pvalues_ = np.full(len(self.coef_), np.nan)
+        self.lrt_bse_ = np.full(len(self.coef_), np.nan)
+        if self.fit_intercept:
+            self.intercept_lrt_pvalue_ = np.nan
+            self.intercept_lrt_bse_ = np.nan
+
         return self
 
     def conf_int(self, alpha: float = 0.05) -> NDArray[np.float64]:
@@ -313,6 +322,48 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             return list(self.feature_names_in_).index(name)
         except ValueError:
             raise KeyError(f"Unknown feature: '{name}'") from None
+
+    def _compute_single_lrt(self, idx: int) -> None:
+        X, y, sample_weight, offset = self._fit_data
+
+        # fit all indices except for the feature being tested
+        free_indices = [i for i in range(X.shape[1]) if i != idx]
+
+        # We wrap the objective function so that the solver only optimizes the k-1
+        # "free" parameters.
+        # The objective function reconstructs the full k-parameter vector
+        # and computes the penalty using the full kxk Fisher information matrix.
+        def constrained_quantities(beta_free):
+            beta_full = np.insert(beta_free, idx, 0.0)
+            q = compute_logistic_quantities(X, y, beta_full, sample_weight, offset)
+            return LogisticQuantities(
+                loglik=q.loglik,
+                modified_score=q.modified_score[free_indices],
+                fisher_info=q.fisher_info[np.ix_(free_indices, free_indices)],
+            )
+
+        result = newton_raphson(
+            compute_quantities=constrained_quantities,
+            n_features=X.shape[1] - 1,
+            max_iter=self.max_iter,
+            max_step=self.max_step,
+            max_halfstep=self.max_halfstep,
+            tol=self.tol,
+        )
+
+        chi_sq = max(0.0, 2.0 * (self.loglik_ - result.loglik))
+        pval = scipy.stats.chi2.sf(chi_sq, df=1)
+
+        # back-corrected SE: |β|/√χ² (ensures (β/SE)² = χ²)
+        beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
+        bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
+
+        if idx == len(self.coef_):
+            self.intercept_lrt_pvalue_ = pval
+            self.intercept_lrt_bse_ = bse
+        else:
+            self.lrt_pvalues_[idx] = pval
+            self.lrt_bse_[idx] = bse
 
     def decision_function(
         self,
