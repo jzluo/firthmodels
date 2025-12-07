@@ -302,6 +302,18 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     self._compute_single_lrt(idx)
         return self
 
+    def _feature_name_to_index(self, name: str) -> int:
+        """Map feature name to its index"""
+        if not hasattr(self, "feature_names_in_"):
+            raise ValueError(
+                "No feature names available. Pass a DataFrame to fit(), "
+                "or use integer indices."
+            )
+        try:
+            return list(self.feature_names_in_).index(name)
+        except ValueError:
+            raise KeyError(f"Unknown feature: '{name}'") from None
+
     def decision_function(
         self,
         X: ArrayLike,
