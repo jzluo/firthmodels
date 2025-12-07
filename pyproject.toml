@@ -1,7 +1,7 @@
 [project]
 name = "firthmodels"
 version = "0.1.0"
-description = "Add your description here"
+description = "Firth-penalized models in Python"
 readme = "README.md"
 authors = [
     { name = "Jon Luo", email = "20971593+jzluo@users.noreply.github.com" }
