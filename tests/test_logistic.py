@@ -73,3 +73,22 @@ class TestFirthLogisticRegression:
             if check.func.__name__ == "check_sample_weight_equivalence_on_dense_data":
                 continue
             check(estimator)
+
+    def test_lrt_computes_on_demand(self, separation_data):
+        """lrt() computes only requested features and accumulates results."""
+        X, y = separation_data
+        model = FirthLogisticRegression()
+        model.fit(X, y)
+
+        # After lrt(1), only index 1 should be populated
+        model.lrt(1)
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert not np.isnan(model.lrt_pvalues_[1])
+        assert np.all(np.isnan(model.lrt_pvalues_[2:]))
+
+        # After lrt([0, 3]), indices 0, 1, and 3 should be populated
+        model.lrt([0, 3])
+        assert not np.isnan(model.lrt_pvalues_[0])
+        assert not np.isnan(model.lrt_pvalues_[1])
+        assert np.isnan(model.lrt_pvalues_[2])
+        assert not np.isnan(model.lrt_pvalues_[3])
