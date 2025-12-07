@@ -237,7 +237,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     def lrt(
         self,
-        features: int | str | Sequence[int] | Sequence[str] | None = None,
+        features: int | str | Sequence[int | str] | None = None,
     ) -> Self:
         """
         Compute penalized likelihood ratio test p-values.
