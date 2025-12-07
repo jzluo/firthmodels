@@ -301,6 +301,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 elif isinstance(feat, (int, np.integer)):
                     indices.append(feat)
 
+        if n_coef in indices and not self.fit_intercept:
+            raise ValueError("Cannot test intercept when fit_intercept=False")
+
         # compute LRT
         for idx in indices:
             if idx == n_coef:  # intercept

@@ -37,7 +37,9 @@ class TestFirthLogisticRegression:
         expected_lrt_pvalues = np.array(
             [0.0002084147149, 0.0093173148959, 0.0236385713206, 0.0055887969164]
         )
-        expected_lrt_bse = np.array([0.9862810, 0.2599730, 0.3814979, 0.1221874])
+        expected_lrt_bse = np.array(
+            [0.9862809793, 0.2599729631, 0.3814979166, 0.1221874315]
+        )
         expected_intercept_lrt_pvalue = 0.1997147194
         expected_intercept_lrt_bse = 0.3458113448
         np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-4)
