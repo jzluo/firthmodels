@@ -8,7 +8,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils._tags import Tags, ClassifierTags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted, validate_data
-from typing import Literal, Self, cast
+from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
 
@@ -205,6 +205,15 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             self.intercept_bse_ = np.nan
             self.intercept_pvalue_ = np.nan
 
+        # need these for LRT
+        self._fit_data = (X, y, sample_weight, offset)  # X includes intercept column
+
+        self.lrt_pvalues_ = np.full(len(self.coef_), np.nan)
+        self.lrt_bse_ = np.full(len(self.coef_), np.nan)
+        if self.fit_intercept:
+            self.intercept_lrt_pvalue_ = np.nan
+            self.intercept_lrt_bse_ = np.nan
+
         return self
 
     def conf_int(self, alpha: float = 0.05) -> NDArray[np.float64]:
@@ -225,6 +234,145 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         lower = self.coef_ - z * self.bse_
         upper = self.coef_ + z * self.bse_
         return np.column_stack([lower, upper])
+
+    def lrt(
+        self,
+        features: int | str | Sequence[int | str] | None = None,
+    ) -> Self:
+        """
+        Compute penalized likelihood ratio test p-values.
+        Standard errors are also back-corrected using the effect size estimate and the
+        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
+        by 1/SE².
+
+        Parameters
+        ----------
+        features : int, str, sequence of int, sequence of str, or None, default=None
+            Features to test. If None, test all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+
+        Returns
+        -------
+        self : FirthLogisticRegression
+
+        Examples
+        --------
+        >>> model.fit(X, y).lrt()  # compute LR for all features
+        >>> model.lrt_pvalues_
+        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
+        >>> model.lrt_bse_
+        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
+        >>> model.fit(X, y).lrt(0)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan,        nan,        nan])
+        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan, 0.02363857,        nan])
+        """
+        check_is_fitted(self)
+
+        # normalize input to a list of indices
+        n_coef = len(self.coef_)
+        if features is None:
+            indices = list(range(n_coef))
+            if self.fit_intercept:
+                indices.append(n_coef)  # intercept index
+        else:
+            features_seq = (
+                [features] if isinstance(features, (int, np.integer, str)) else features
+            )
+            indices = []
+            for feat in features_seq:
+                if isinstance(feat, str):
+                    if feat == "intercept":
+                        indices.append(n_coef)
+                    else:
+                        indices.append(self._feature_name_to_index(feat))
+                elif isinstance(feat, (int, np.integer)):
+                    indices.append(feat)
+                else:
+                    raise TypeError(
+                        f"Elements of `features` must be int or str, but got {type(feat)}"
+                    )
+
+        if n_coef in indices and not self.fit_intercept:
+            raise ValueError("Cannot test intercept when fit_intercept=False")
+
+        # compute LRT
+        for idx in indices:
+            if idx == n_coef:  # intercept
+                if np.isnan(self.intercept_lrt_pvalue_):
+                    self._compute_single_lrt(idx)
+            else:
+                if np.isnan(self.lrt_pvalues_[idx]):
+                    self._compute_single_lrt(idx)
+        return self
+
+    def _feature_name_to_index(self, name: str) -> int:
+        """Map feature name to its index"""
+        if not hasattr(self, "feature_names_in_"):
+            raise ValueError(
+                "No feature names available. Pass a DataFrame to fit(), "
+                "or use integer indices."
+            )
+        try:
+            return list(self.feature_names_in_).index(name)
+        except ValueError:
+            raise KeyError(f"Unknown feature: '{name}'") from None
+
+    def _compute_single_lrt(self, idx: int) -> None:
+        """
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
+        back-corrected standard error.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the coefficient to test. Use len(coef_) for the intercept.
+        """
+        X, y, sample_weight, offset = self._fit_data
+
+        # fit all indices except for the feature being tested
+        free_indices = [i for i in range(X.shape[1]) if i != idx]
+
+        # Wrapper so the solver only optimizes the k-1 "free" parameters.
+        # Reconstructs full k-vector, computes quantities with full Fisher,
+        # then slices score and Fisher to k-1 dimensions before returning to the solver.
+        def constrained_quantities(beta_free):
+            beta_full = np.insert(beta_free, idx, 0.0)
+            q = compute_logistic_quantities(X, y, beta_full, sample_weight, offset)
+            return LogisticQuantities(
+                loglik=q.loglik,
+                modified_score=q.modified_score[free_indices],
+                fisher_info=q.fisher_info[np.ix_(free_indices, free_indices)],
+            )
+
+        result = newton_raphson(
+            compute_quantities=constrained_quantities,
+            n_features=X.shape[1] - 1,
+            max_iter=self.max_iter,
+            max_step=self.max_step,
+            max_halfstep=self.max_halfstep,
+            tol=self.tol,
+        )
+
+        chi_sq = max(0.0, 2.0 * (self.loglik_ - result.loglik))
+        pval = scipy.stats.chi2.sf(chi_sq, df=1)
+
+        # back-corrected SE: |β|/√χ² (ensures (β/SE)² = χ²)
+        beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
+        bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
+
+        if idx == len(self.coef_):
+            self.intercept_lrt_pvalue_ = pval
+            self.intercept_lrt_bse_ = bse
+        else:
+            self.lrt_pvalues_[idx] = pval
+            self.lrt_bse_[idx] = bse
 
     def decision_function(
         self,
