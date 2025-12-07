@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
 from firthmodels import FirthLogisticRegression
@@ -72,6 +73,7 @@ class TestFirthLogisticRegression:
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
 
+    @pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
     def test_sklearn_compatible(self):
         """Passes sklearn's estimator checks."""
         for estimator, check in estimator_checks_generator(FirthLogisticRegression()):
