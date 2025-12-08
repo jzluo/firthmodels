@@ -257,8 +257,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         References
         ----------
-        Venzon, D. J., & Moolgavkar, S. H. (1988). A Method for Computing
-        Profile-Likelihood-Based Confidence Intervals. Applied Statistics.
+        Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals." Applied Statistics,
+        37(1), 87-94
         """
         check_is_fitted(self)
         n_params = len(self.bse_)
@@ -314,6 +315,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             for idx in indices:
                 if np.isnan(ci[idx, 0]):  # not yet computed
                     for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                        which = cast(Literal[-1, 1], which)  # mypy -_-
                         bound, converged, n_iter = self._compute_profile_ci_bound(
                             idx=idx,
                             l_star=l_star,
@@ -336,6 +338,139 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         else:
             raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
+
+    def _compute_profile_ci_bound(
+        self,
+        idx: int,
+        l_star: float,
+        which: Literal[-1, 1],
+        max_iter: int,
+        tol: float,
+        chi2_crit: float,
+    ) -> tuple[float, bool, int]:
+        """
+        Compute one profile CI bound using Venzon-Moolgavkar (1988) algorithm.
+
+        Solves F(theta) = [l(theta) - l*, dl/dw]' = 0 where beta = theta[idx]
+        is the parameter of interest and w (omega) are nuisance parameters.
+
+        References
+        ----------
+        Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals." Applied Statistics,
+        37(1), 87-94.
+        """
+        X, y, sample_weight, offset = self._fit_data
+        k = X.shape[1]
+
+        # Initialize at MLE
+        if self.fit_intercept:
+            theta = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            theta = self.coef_.copy()
+
+        # Appendix step 1: compute and store D0 = d2l/dtheta2 at MLE
+        q = compute_logistic_quantities(X, y, theta, sample_weight, offset)
+        # negative Fisher info == Hessian of log-likelihood
+        D0 = -q.fisher_info
+
+        # beta = parameter of interest, omega = nuisance parameters
+        other_idx = [i for i in range(k) if i != idx]
+
+        # Appendix step 2: compute dw/dbeta and h
+        if len(other_idx) > 0:
+            D0_ww = D0[np.ix_(other_idx, other_idx)]  # d2l/dw2
+            D0_bw = D0[idx, other_idx]  # d2l/dbeta*dw
+
+            # dw/dbeta = -(d2l/dw2)^-1 @ (d2l/dbeta*dw)  (Eq. 5)
+            try:
+                dw_db = -np.linalg.solve(D0_ww, D0_bw)
+            except np.linalg.LinAlgError:
+                dw_db = -np.linalg.lstsq(D0_ww, D0_bw, rcond=None)[0]
+
+            # d2l_bar/dbeta2 = D_bb - D_bw @ D_ww^-1 @ D_wb (eq. 6 denominator)
+            d2l_db2 = D0[idx, idx] + D0_bw @ dw_db
+        else:
+            # Single parameter case
+            dw_db = np.array([])
+            d2l_db2 = D0[idx, idx]
+
+        # step size h (Eq. 6)
+        if d2l_db2 >= 0:
+            # Hessian should be negative definite, fallback
+            h = which * 0.5
+        else:
+            h = which * np.sqrt(chi2_crit / abs(d2l_db2)) / 2
+
+        # Appendix step 3: theta(1) = theta_hat + h * [1, dw/dbeta]' (Eq. 4)
+        tangent = np.zeros(k)
+        tangent[idx] = 1.0
+        if len(other_idx) > 0:
+            tangent[other_idx] = dw_db
+        theta = theta + h * tangent
+
+        # Appendix steps 4-9: Modified Newton-Raphson
+        for iteration in range(1, max_iter + 1):
+            # Appendix step 4: compute score and Hessian at theta(i)
+            q = compute_logistic_quantities(X, y, theta, sample_weight, offset)
+
+            # Appendix step 9: check convergence
+            if abs(q.loglik - l_star) <= tol:
+                return theta[idx], True, iteration
+
+            # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
+            F = q.modified_score.copy()
+            F[idx] = q.loglik - l_star
+
+            # D = d2l/dtheta2 at current theta (Appendix step 4)
+            D = -q.fisher_info
+            G = D.copy()
+            G[idx, :] = q.modified_score  # Jacobian (Eq. 3)
+
+            # Appendix step 6: v = G^-1 F (direction to subtract)
+            try:
+                G_inv = np.linalg.inv(G)
+                v = G_inv @ F
+            except np.linalg.LinAlgError:
+                v = cast(NDArray[np.float64], np.linalg.lstsq(G, F, rcond=None)[0])
+                try:
+                    G_inv = np.linalg.pinv(G)
+                except np.linalg.LinAlgError:
+                    # singular G; take damped step (pg 92)
+                    theta = theta - 0.1 * v
+                    continue
+
+            # Appendix step 7: quadratic correction
+            # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)
+            g_j = G_inv[:, idx]
+            a = g_j @ D @ g_j
+            b = 2 * v @ D @ g_j - 2
+            c = v @ D @ v
+
+            discriminant = b * b - 4 * a * c
+
+            if discriminant >= 0 and abs(a) > 1e-10:
+                sqrt_disc = np.sqrt(discriminant)
+                s1 = (-b + sqrt_disc) / (2 * a)
+                s2 = (-b - sqrt_disc) / (2 * a)
+
+                # Pick root giving smaller step (pg 90)
+                step1 = -v - s1 * g_j
+                step2 = -v - s2 * g_j
+                norm1 = step1 @ (-D0) @ step1
+                norm2 = step2 @ (-D0) @ step2
+
+                s = s1 if norm1 < norm2 else s2
+                delta = -v - s * g_j  # Eq. 9
+            else:
+                # No real roots: damped step (pg 92)
+                delta = -0.1 * v
+
+            # Appendix step 8: theta(i+1) = theta(i) + delta
+            theta = theta + delta
+
+        # failed to converge
+        return theta[idx], False, max_iter
 
     def lrt(
         self,
