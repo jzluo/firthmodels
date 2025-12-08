@@ -211,7 +211,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
-        self._profile_ci_cache: dict[float, NDArray[np.float64]] = {}
+        self._profile_ci_cache: dict[tuple[float, float, int], NDArray[np.float64]] = {}
         return self
 
     def conf_int(
@@ -257,8 +257,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         -----
         Profile-likelihood CIs are superior to Wald CIs when the likelihood is
         asymmetric, which can occur with small samples or separated data.
-        For `method='pl'`, results are cached. Subsequent calls with the same alpha and
-        method return cached values without recomputation.
+        For `method='pl'`, results are cached. Subsequent calls with the same `alpha`,
+        `tol`, and `max_iter` return cached values without recomputation.
 
         References
         ----------
@@ -280,10 +280,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             return np.column_stack([lower, upper])
 
         elif method == "pl":
-            # get or create cache for this alpha
-            if alpha not in self._profile_ci_cache:
-                self._profile_ci_cache[alpha] = np.full((n_params, 2), np.nan)
-            ci = self._profile_ci_cache[alpha]
+            # get or create cache for this (alpha, tol, max_iter) combination
+            cache_key = (alpha, tol, max_iter)
+            if cache_key not in self._profile_ci_cache:
+                self._profile_ci_cache[cache_key] = np.full((n_params, 2), np.nan)
+            ci = self._profile_ci_cache[cache_key]
 
             # normalize features to indices
             n_coef = len(self.coef_)
