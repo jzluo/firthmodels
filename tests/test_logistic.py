@@ -9,11 +9,12 @@ class TestFirthLogisticRegression:
     """Tests for FirthLogisticRegression."""
 
     def test_matches_logistf_with_separation(self, separation_data):
-        """Coefficients and inference match logistf on quasi-separated data."""
+        """Matches logistf on quasi-separated data."""
         X, y = separation_data
         model = FirthLogisticRegression()
         model.fit(X, y)
         model.lrt()
+        ci = model.conf_int(alpha=0.05, method="pl")
 
         # coefficients
         expected_intercept = -0.4434562830
@@ -51,6 +52,17 @@ class TestFirthLogisticRegression:
         np.testing.assert_allclose(
             model.intercept_lrt_bse_, expected_intercept_lrt_bse, rtol=1e-4
         )
+
+        # profile CI
+        expected_lower = np.array(
+            [1.3901042899, 0.1602568036, -1.6677883758, 0.0893054012]
+        )
+        expected_upper = np.array(
+            [8.5876062114, 1.2568999211, -0.1135186948, 0.6572681313]
+        )
+
+        np.testing.assert_allclose(ci[:, 0], expected_lower, rtol=1e-4)
+        np.testing.assert_allclose(ci[:, 1], expected_upper, rtol=1e-4)
 
     def test_fit_intercept_false(self, separation_data):
         """Fits without intercept."""
