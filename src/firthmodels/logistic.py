@@ -1,10 +1,12 @@
 import numpy as np
 import scipy
+import warnings
 
 from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils._tags import Tags, ClassifierTags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -204,27 +206,136 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
-
+        self._profile_ci_cache: dict[float, NDArray[np.float64]] = {}
         return self
 
-    def conf_int(self, alpha: float = 0.05) -> NDArray[np.float64]:
+    def conf_int(
+        self,
+        alpha: float = 0.05,
+        method: Literal["wald", "pl"] = "wald",
+        features: int | str | Sequence[int | str] | None = None,
+        max_iter: int = 25,
+        tol: float = 1e-4,
+    ) -> NDArray[np.float64]:
         """
-        Wald confidence intervals for the coefficients.
+        Compute confidence intervals for the coefficients. If `method='pl'`, profile
+        likelihood confidence intervals are computed using the Venzon-Moolgavkar method.
 
         Parameters
         ----------
         alpha : float, default=0.05
             Significance level (default 0.05 for 95% CI)
+        method : {'wald', 'pl'}, default='wald'
+            Method to compute confidence intervals.
+            - 'wald': Wald confidence intervals (fast)
+            - 'pl': Profile likelihood confidence intervals (more accurate, slower)
+        features: int, str, sequence of int, sequence of str, or None, default=None
+            Features to compute CIs for (only used for `method='pl'`).
+            If None, compute for all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+        max_iter : int, default=25
+            Maximum number of iterations per bound (only used for `method='pl'`)
+        tol : float, default=1e-4
+            Convergence tolerance (only used for `method='pl'`)
 
         Returns
         -------
         ndarray, shape(n_features, 2)
             Column 0: lower bounds, Column 1: upper bounds
+            Includes intercept as last row if `fit_intercept=True`.
+
+        Notes
+        -----
+        Profile-likelihood CIs are superior to Wald CIs when the likelihood is
+        asymmetric, which can occur with small samples or separated data.
+        For `method='pl'`, results are cached. Subsequent calls with the same alpha and
+        method return cached values without recomputation.
+
+        References
+        ----------
+        Venzon, D. J., & Moolgavkar, S. H. (1988). A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals. Applied Statistics.
         """
-        z = scipy.stats.norm.ppf(1 - alpha / 2)
-        lower = self.coef_ - z * self.bse_
-        upper = self.coef_ + z * self.bse_
-        return np.column_stack([lower, upper])
+        check_is_fitted(self)
+        n_params = len(self.bse_)
+
+        if method == "wald":
+            z = scipy.stats.norm.ppf(1 - alpha / 2)
+            if self.fit_intercept:
+                beta = np.concatenate([self.coef_, [self.intercept_]])
+            else:
+                beta = self.coef_
+            lower = beta - z * self.bse_
+            upper = beta + z * self.bse_
+            return np.column_stack([lower, upper])
+
+        elif method == "pl":
+            # get or create cache for this alpha
+            if alpha not in self._profile_ci_cache:
+                self._profile_ci_cache[alpha] = np.full((n_params, 2), np.nan)
+            ci = self._profile_ci_cache[alpha]
+
+            # normalize features to indices
+            n_coef = len(self.coef_)
+            if features is None:
+                indices = list(range(n_params))
+            else:
+                features_seq = (
+                    [features]
+                    if isinstance(features, (int, np.integer, str))
+                    else features
+                )
+                indices = []
+                for feat in features_seq:
+                    if isinstance(feat, str):
+                        if feat == "intercept":
+                            if not self.fit_intercept:
+                                raise ValueError(
+                                    "Cannot compute CI for intercept when fit_intercept=False"
+                                )
+                            indices.append(n_coef)
+                        else:
+                            indices.append(self._feature_name_to_index(feat))
+                    elif isinstance(feat, (int, np.integer)):
+                        indices.append(int(feat))
+                    else:
+                        raise TypeError(
+                            f"Elements of `features` must be int or str, got {type(feat)}"
+                        )
+
+            # compute profile CIs for features not already cached
+            chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
+            l_star = self.loglik_ - chi2_crit / 2
+
+            for idx in indices:
+                if np.isnan(ci[idx, 0]):  # not yet computed
+                    for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                        bound, converged, n_iter = self._compute_profile_ci_bound(
+                            idx=idx,
+                            l_star=l_star,
+                            which=which,
+                            max_iter=max_iter,
+                            tol=tol,
+                            chi2_crit=chi2_crit,
+                        )
+
+                        if converged:
+                            ci[idx, bound_idx] = bound
+                        else:
+                            warnings.warn(
+                                f"Profile-likelihood CI did not converge for parameter {idx} "
+                                f"({'lower' if which == -1 else 'upper'} bound) after {n_iter} iterations.",
+                                ConvergenceWarning,
+                                stacklevel=2,
+                            )
+            return ci
+
+        else:
+            raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
 
     def lrt(
         self,
