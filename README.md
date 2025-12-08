@@ -89,8 +89,9 @@ model.lrt(['snp', 'age']) # By name (if fitted with DataFrame)
 ### Confidence intervals
 
 ```python
-model.conf_int()          # 95% Wald CIs
-model.conf_int(alpha=0.1) # 90% CIs
+model.conf_int()                    # 95% Wald CIs
+model.conf_int(alpha=0.1)           # 90% CIs
+model.conf_int(method='pl')         # Profile likelihood CIs (more accurate)
 ```
 
 ### Sample weights and offsets
@@ -118,17 +119,13 @@ model.fit(X, y, offset=offset)
 |-----------|-------------|
 | `coef_` | Coefficient estimates |
 | `intercept_` | Intercept (0.0 if `fit_intercept=False`) |
-| `bse_` | Wald standard errors |
-| `intercept_bse_` | Wald standard error for intercept |
-| `pvalues_` | Wald p-values |
-| `intercept_pvalue_` | Wald p-value for intercept |
+| `bse_` | Wald standard errors; includes intercept if `fit_intercept=True` |
+| `pvalues_` | Wald p-values; includes intercept if `fit_intercept=True` |
 | `loglik_` | Penalized log-likelihood |
 | `n_iter_` | Number of iterations |
 | `converged_` | Whether the solver converged |
-| `lrt_pvalues_` | LRT p-values (after calling `lrt()`) |
-| `lrt_bse_` | Back-corrected SEs (after calling `lrt()`) |
-| `intercept_lrt_pvalue_` | LRT p-value for intercept |
-| `intercept_lrt_bse_` | Back-corrected SE for intercept |
+| `lrt_pvalues_` | LRT p-values (after calling `lrt()`); includes intercept if `fit_intercept=True` |
+| `lrt_bse_` | Back-corrected SEs (after calling `lrt()`); includes intercept if `fit_intercept=True` |
 
 ### Methods
 
@@ -140,7 +137,7 @@ model.fit(X, y, offset=offset)
 | `predict_log_proba(X)` | Predict log class probabilities |
 | `decision_function(X)` | Return linear predictor values |
 | `lrt(features)` | Compute LRT p-values; `features` can be indices or column names. If `None`, tests all features. |
-| `conf_int(alpha)` | Wald confidence intervals; `alpha` is the two-sided significance level (e.g. 0.05 for 95% CIs) |
+| `conf_int(alpha, method)` | Confidence intervals; `method='wald'` (default) or `'pl'` for profile likelihood |
 
 ## Roadmap
 
@@ -156,6 +153,8 @@ Heinze G, Schemper M (2002). A solution to the problem of separation in logistic
 
 Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
 quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
+
+Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing Profile-Likelihood-Based Confidence Intervals." Applied Statistics, 37(1), 87-94.
 
 ## License
 
