@@ -196,23 +196,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         z = result.beta / bse
         pvalues = 2 * scipy.stats.norm.sf(np.abs(z))
 
-        if self.fit_intercept:
-            self.bse_, self.intercept_bse_ = bse[:-1], bse[-1]
-            self.pvalues_, self.intercept_pvalue_ = pvalues[:-1], pvalues[-1]
-        else:
-            self.bse_ = bse
-            self.pvalues_ = pvalues
-            self.intercept_bse_ = np.nan
-            self.intercept_pvalue_ = np.nan
+        self.bse_ = bse
+        self.pvalues_ = pvalues
 
         # need these for LRT
         self._fit_data = (X, y, sample_weight, offset)  # X includes intercept column
 
-        self.lrt_pvalues_ = np.full(len(self.coef_), np.nan)
-        self.lrt_bse_ = np.full(len(self.coef_), np.nan)
-        if self.fit_intercept:
-            self.intercept_lrt_pvalue_ = np.nan
-            self.intercept_lrt_bse_ = np.nan
+        self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
+        self.lrt_bse_ = np.full(len(result.beta), np.nan)
 
         return self
 
@@ -304,12 +295,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         # compute LRT
         for idx in indices:
-            if idx == n_coef:  # intercept
-                if np.isnan(self.intercept_lrt_pvalue_):
-                    self._compute_single_lrt(idx)
-            else:
-                if np.isnan(self.lrt_pvalues_[idx]):
-                    self._compute_single_lrt(idx)
+            if np.isnan(self.lrt_pvalues_[idx]):
+                self._compute_single_lrt(idx)
         return self
 
     def _feature_name_to_index(self, name: str) -> int:
@@ -367,12 +354,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
         bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
 
-        if idx == len(self.coef_):
-            self.intercept_lrt_pvalue_ = pval
-            self.intercept_lrt_bse_ = bse
-        else:
-            self.lrt_pvalues_[idx] = pval
-            self.lrt_bse_[idx] = bse
+        self.lrt_pvalues_[idx] = pval
+        self.lrt_bse_[idx] = bse
 
     def decision_function(
         self,
