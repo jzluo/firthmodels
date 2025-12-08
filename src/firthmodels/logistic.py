@@ -55,29 +55,34 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Number of iterations the solver ran.
     converged_ : bool
         Whether the solver converged within `max_iter`.
-    bse_: ndarray of shape (n_features,)
-        Wald standard errors for the coefficient estimates.
-    intercept_bse_ : float
-        Wald standard error for the intercept.
-    pvalues_ : ndarray of shape (n_features,)
-        Wald p-values for the coefficients.
-    intercept_pvalue_ : float
-        Wald p-value for the intercept.
+    bse_ : ndarray of shape (n_params,)
+        Wald standard errors. Includes intercept as last element if
+        `fit_intercept=True`, where n_params = n_features + 1.
+    pvalues_ : ndarray of shape (n_params,)
+        Wald p-values. Includes intercept as last element if `fit_intercept=True`.
+    lrt_pvalues_ : ndarray of shape (n_params,)
+        Likelihood ratio test p-values. Computed by `lrt()`. Values are
+        NaN until computed. Includes intercept as last element if `fit_intercept=True`.
+    lrt_bse_ : ndarray of shape (n_params,)
+        Back-corrected standard errors from LRT. Computed by `lrt()`.
+        Values are NaN until computed. Includes intercept as last element if
+        `fit_intercept=True`.
     n_features_in_ : int
         Number of features seen during `fit`.
     feature_names_in_ : ndarray of shape (n_features_in_,)
-        Names of features seen during `fit`. Defined only when X has feature names that are all strings.
+        Names of features seen during `fit`. Defined only when X has feature names
+        that are all strings.
 
     References
     ----------
     Firth D (1993). Bias reduction of maximum likelihood estimates.
-    Biometrika 80, 27–38.
+    Biometrika 80, 27-38.
 
     Heinze G, Schemper M (2002). A solution to the problem of separation in logistic
     regression. Statistics in Medicine 21: 2409-2419.
 
     Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
-    quantitative and binary traits. Nature Genetics 53, 1097–1103.
+    quantitative and binary traits. Nature Genetics 53, 1097-1103.
 
     Examples
     --------
