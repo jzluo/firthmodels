@@ -414,13 +414,13 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             # Appendix step 4: compute score and Hessian at theta(i)
             q = compute_logistic_quantities(X, y, theta, sample_weight, offset)
 
-            # Appendix step 9: check convergence
-            if abs(q.loglik - l_star) <= tol:
-                return theta[idx], True, iteration
-
             # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
             F = q.modified_score.copy()
             F[idx] = q.loglik - l_star
+
+            # Appendix step 9: check convergence
+            if np.max(np.abs(F)) <= tol:
+                return theta[idx], True, iteration
 
             # D = d2l/dtheta2 at current theta (Appendix step 4)
             D = -q.fisher_info
