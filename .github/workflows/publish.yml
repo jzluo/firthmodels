@@ -67,7 +67,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           for i in {1..30}; do
-            if uv pip install --system \
+            if uv pip install --system --refresh \
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
               "firthmodels==$VERSION"; then
