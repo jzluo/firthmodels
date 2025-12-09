@@ -211,7 +211,13 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
+
+        # _profile_ci_cache and _profile_ci_computed are keyed by (alpha, tol, max_iter)
         self._profile_ci_cache: dict[tuple[float, float, int], NDArray[np.float64]] = {}
+        # tracks completed bound computations; False means never tried or interrupted
+        self._profile_ci_computed: dict[
+            tuple[float, float, int], NDArray[np.bool_]
+        ] = {}
         return self
 
     def conf_int(
@@ -284,17 +290,21 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             cache_key = (alpha, tol, max_iter)
             if cache_key not in self._profile_ci_cache:
                 self._profile_ci_cache[cache_key] = np.full((n_params, 2), np.nan)
+                self._profile_ci_computed[cache_key] = np.zeros(
+                    (n_params, 2), dtype=bool
+                )
             ci = self._profile_ci_cache[cache_key]
+            computed = self._profile_ci_computed[cache_key]
 
             indices = self._resolve_feature_indices(features)
 
-            # compute profile CIs for features not already cached
+            # compute profile CIs for bounds not already attempted
             chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
             l_star = self.loglik_ - chi2_crit / 2
 
             for idx in indices:
-                if np.isnan(ci[idx, 0]):  # not yet computed
-                    for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                    if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
                         bound, converged, n_iter = self._compute_profile_ci_bound(
                             idx=idx,
@@ -314,6 +324,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                                 ConvergenceWarning,
                                 stacklevel=2,
                             )
+                        # mark AFTER completion (interrupt safety for jupyter people)
+                        computed[idx, bound_idx] = True
             return ci
 
         else:
