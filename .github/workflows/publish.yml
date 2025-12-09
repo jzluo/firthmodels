@@ -62,7 +62,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           for i in {1..30}; do
-            if uv pip install --system \
+            if uv pip install \
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
               "firthmodels==$VERSION"; then
@@ -77,7 +77,7 @@ jobs:
       - name: Verify import and run tests
         run: |
           uv run python -c "from firthmodels import FirthLogisticRegression; print('Import OK')"
-          uv pip install --system pytest
+          uv pip install pytest
           uv run pytest tests/
 
   publish-pypi:
