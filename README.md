@@ -24,9 +24,8 @@ This is common in:
 
 ## Installation
 
-For now:
 ```bash
-pip install git+https://github.com/jzluo/firthmodels.git
+pip install firthmodels
 ```
 
 Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.

@@ -2,7 +2,7 @@ cff-version: 1.2.0
 title: firthmodels
 message: "If you use this software, please cite it as below."
 type: software
-version: 0.1.0.dev3
+version: 0.1.0
 authors:
   - family-names: Luo
     given-names: Jonathan Z.
