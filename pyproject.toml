@@ -3,15 +3,48 @@ name = "firthmodels"
 version = "0.1.0"
 description = "Firth-penalized models in Python"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Jon Luo", email = "20971593+jzluo@users.noreply.github.com" }
 ]
 requires-python = ">=3.11"
+keywords = [
+    "firth logistic regression",
+    "bias-reduced logistic regression",
+    "bias reduction",
+    "penalized likelihood",
+    "logistic regression",
+    "firth penalization",
+    "rare events",
+    "data separation",
+    "complete separation",
+    "quasi-complete separation",
+    "small sample",
+    "statistics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "numpy>=1.24",
     "scikit-learn>=1.6",
     "scipy>=1.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jzluo/firthmodels"
+Repository = "https://github.com/jzluo/firthmodels"
+Issues = "https://github.com/jzluo/firthmodels/issues"
 
 [build-system]
 requires = ["hatchling"]
