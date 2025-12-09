@@ -1,10 +1,12 @@
 import numpy as np
 import scipy
+import warnings
 
 from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils._tags import Tags, ClassifierTags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -53,29 +55,34 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Number of iterations the solver ran.
     converged_ : bool
         Whether the solver converged within `max_iter`.
-    bse_: ndarray of shape (n_features,)
-        Wald standard errors for the coefficient estimates.
-    intercept_bse_ : float
-        Wald standard error for the intercept.
-    pvalues_ : ndarray of shape (n_features,)
-        Wald p-values for the coefficients.
-    intercept_pvalue_ : float
-        Wald p-value for the intercept.
+    bse_ : ndarray of shape (n_params,)
+        Wald standard errors. Includes intercept as last element if
+        `fit_intercept=True`, where n_params = n_features + 1.
+    pvalues_ : ndarray of shape (n_params,)
+        Wald p-values. Includes intercept as last element if `fit_intercept=True`.
+    lrt_pvalues_ : ndarray of shape (n_params,)
+        Likelihood ratio test p-values. Computed by `lrt()`. Values are
+        NaN until computed. Includes intercept as last element if `fit_intercept=True`.
+    lrt_bse_ : ndarray of shape (n_params,)
+        Back-corrected standard errors from LRT. Computed by `lrt()`.
+        Values are NaN until computed. Includes intercept as last element if
+        `fit_intercept=True`.
     n_features_in_ : int
         Number of features seen during `fit`.
     feature_names_in_ : ndarray of shape (n_features_in_,)
-        Names of features seen during `fit`. Defined only when X has feature names that are all strings.
+        Names of features seen during `fit`. Defined only when X has feature names
+        that are all strings.
 
     References
     ----------
     Firth D (1993). Bias reduction of maximum likelihood estimates.
-    Biometrika 80, 27–38.
+    Biometrika 80, 27-38.
 
     Heinze G, Schemper M (2002). A solution to the problem of separation in logistic
     regression. Statistics in Medicine 21: 2409-2419.
 
     Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
-    quantitative and binary traits. Nature Genetics 53, 1097–1103.
+    quantitative and binary traits. Nature Genetics 53, 1097-1103.
 
     Examples
     --------
@@ -196,44 +203,266 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         z = result.beta / bse
         pvalues = 2 * scipy.stats.norm.sf(np.abs(z))
 
-        if self.fit_intercept:
-            self.bse_, self.intercept_bse_ = bse[:-1], bse[-1]
-            self.pvalues_, self.intercept_pvalue_ = pvalues[:-1], pvalues[-1]
-        else:
-            self.bse_ = bse
-            self.pvalues_ = pvalues
-            self.intercept_bse_ = np.nan
-            self.intercept_pvalue_ = np.nan
+        self.bse_ = bse
+        self.pvalues_ = pvalues
 
         # need these for LRT
         self._fit_data = (X, y, sample_weight, offset)  # X includes intercept column
 
-        self.lrt_pvalues_ = np.full(len(self.coef_), np.nan)
-        self.lrt_bse_ = np.full(len(self.coef_), np.nan)
-        if self.fit_intercept:
-            self.intercept_lrt_pvalue_ = np.nan
-            self.intercept_lrt_bse_ = np.nan
+        self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
+        self.lrt_bse_ = np.full(len(result.beta), np.nan)
 
+        # _profile_ci_cache and _profile_ci_computed are keyed by (alpha, tol, max_iter)
+        self._profile_ci_cache: dict[tuple[float, float, int], NDArray[np.float64]] = {}
+        # tracks completed bound computations; False means never tried or interrupted
+        self._profile_ci_computed: dict[
+            tuple[float, float, int], NDArray[np.bool_]
+        ] = {}
         return self
 
-    def conf_int(self, alpha: float = 0.05) -> NDArray[np.float64]:
+    def conf_int(
+        self,
+        alpha: float = 0.05,
+        method: Literal["wald", "pl"] = "wald",
+        features: int | str | Sequence[int | str] | None = None,
+        max_iter: int = 25,
+        tol: float = 1e-4,
+    ) -> NDArray[np.float64]:
         """
-        Wald confidence intervals for the coefficients.
+        Compute confidence intervals for the coefficients. If `method='pl'`, profile
+        likelihood confidence intervals are computed using the Venzon-Moolgavkar method.
 
         Parameters
         ----------
         alpha : float, default=0.05
             Significance level (default 0.05 for 95% CI)
+        method : {'wald', 'pl'}, default='wald'
+            Method to compute confidence intervals.
+            - 'wald': Wald confidence intervals (fast)
+            - 'pl': Profile likelihood confidence intervals (more accurate, slower)
+        features: int, str, sequence of int, sequence of str, or None, default=None
+            Features to compute CIs for (only used for `method='pl'`).
+            If None, compute for all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+        max_iter : int, default=25
+            Maximum number of iterations per bound (only used for `method='pl'`)
+        tol : float, default=1e-4
+            Convergence tolerance (only used for `method='pl'`)
 
         Returns
         -------
         ndarray, shape(n_features, 2)
             Column 0: lower bounds, Column 1: upper bounds
+            Includes intercept as last row if `fit_intercept=True`.
+
+        Notes
+        -----
+        Profile-likelihood CIs are superior to Wald CIs when the likelihood is
+        asymmetric, which can occur with small samples or separated data.
+        For `method='pl'`, results are cached. Subsequent calls with the same `alpha`,
+        `tol`, and `max_iter` return cached values without recomputation.
+
+        References
+        ----------
+        Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals." Applied Statistics,
+        37(1), 87-94
         """
-        z = scipy.stats.norm.ppf(1 - alpha / 2)
-        lower = self.coef_ - z * self.bse_
-        upper = self.coef_ + z * self.bse_
-        return np.column_stack([lower, upper])
+        check_is_fitted(self)
+        n_params = len(self.bse_)
+
+        if method == "wald":
+            z = scipy.stats.norm.ppf(1 - alpha / 2)
+            if self.fit_intercept:
+                beta = np.concatenate([self.coef_, [self.intercept_]])
+            else:
+                beta = self.coef_
+            lower = beta - z * self.bse_
+            upper = beta + z * self.bse_
+            return np.column_stack([lower, upper])
+
+        elif method == "pl":
+            # get or create cache for this (alpha, tol, max_iter) combination
+            cache_key = (alpha, tol, max_iter)
+            if cache_key not in self._profile_ci_cache:
+                self._profile_ci_cache[cache_key] = np.full((n_params, 2), np.nan)
+                self._profile_ci_computed[cache_key] = np.zeros(
+                    (n_params, 2), dtype=bool
+                )
+            ci = self._profile_ci_cache[cache_key]
+            computed = self._profile_ci_computed[cache_key]
+
+            indices = self._resolve_feature_indices(features)
+
+            # compute profile CIs for bounds not already attempted
+            chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
+            l_star = self.loglik_ - chi2_crit / 2
+
+            for idx in indices:
+                for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                    if not computed[idx, bound_idx]:
+                        which = cast(Literal[-1, 1], which)  # mypy -_-
+                        bound, converged, n_iter = self._compute_profile_ci_bound(
+                            idx=idx,
+                            l_star=l_star,
+                            which=which,
+                            max_iter=max_iter,
+                            tol=tol,
+                            chi2_crit=chi2_crit,
+                        )
+
+                        if converged:
+                            ci[idx, bound_idx] = bound
+                        else:
+                            warnings.warn(
+                                f"Profile-likelihood CI did not converge for parameter {idx} "
+                                f"({'lower' if which == -1 else 'upper'} bound) after {n_iter} iterations.",
+                                ConvergenceWarning,
+                                stacklevel=2,
+                            )
+                        # mark AFTER completion (interrupt safety for jupyter people)
+                        computed[idx, bound_idx] = True
+            return ci
+
+        else:
+            raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
+
+    def _compute_profile_ci_bound(
+        self,
+        idx: int,
+        l_star: float,
+        which: Literal[-1, 1],
+        max_iter: int,
+        tol: float,
+        chi2_crit: float,
+    ) -> tuple[float, bool, int]:
+        """
+        Compute one profile CI bound using Venzon-Moolgavkar (1988) algorithm.
+
+        Solves F(theta) = [l(theta) - l*, dl/dw]' = 0 where beta = theta[idx]
+        is the parameter of interest and w (omega) are nuisance parameters.
+
+        References
+        ----------
+        Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals." Applied Statistics,
+        37(1), 87-94.
+        """
+        X, y, sample_weight, offset = self._fit_data
+        k = X.shape[1]
+
+        # Initialize at MLE
+        if self.fit_intercept:
+            theta = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            theta = self.coef_.copy()
+
+        # Appendix step 1: compute and store D0 = d2l/dtheta2 at MLE
+        q = compute_logistic_quantities(X, y, theta, sample_weight, offset)
+        # negative Fisher info == Hessian of log-likelihood
+        D0 = -q.fisher_info
+
+        # beta = parameter of interest, omega = nuisance parameters
+        other_idx = [i for i in range(k) if i != idx]
+
+        # Appendix step 2: compute dw/dbeta and h
+        if len(other_idx) > 0:
+            D0_ww = D0[np.ix_(other_idx, other_idx)]  # d2l/dw2
+            D0_bw = D0[idx, other_idx]  # d2l/dbeta*dw
+
+            # dw/dbeta = -(d2l/dw2)^-1 @ (d2l/dbeta*dw)  (Eq. 5)
+            try:
+                dw_db = -np.linalg.solve(D0_ww, D0_bw)
+            except np.linalg.LinAlgError:
+                dw_db = -np.linalg.lstsq(D0_ww, D0_bw, rcond=None)[0]
+
+            # d2l_bar/dbeta2 = D_bb - D_bw @ D_ww^-1 @ D_wb (eq. 6 denominator)
+            d2l_db2 = D0[idx, idx] + D0_bw @ dw_db
+        else:
+            # Single parameter case
+            dw_db = np.array([])
+            d2l_db2 = D0[idx, idx]
+
+        # step size h (Eq. 6)
+        if d2l_db2 >= 0:
+            # Hessian should be negative definite, fallback
+            h = which * 0.5
+        else:
+            h = which * np.sqrt(chi2_crit / abs(d2l_db2)) / 2
+
+        # Appendix step 3: theta(1) = theta_hat + h * [1, dw/dbeta]' (Eq. 4)
+        tangent = np.zeros(k)
+        tangent[idx] = 1.0
+        if len(other_idx) > 0:
+            tangent[other_idx] = dw_db
+        theta = theta + h * tangent
+
+        # Appendix steps 4-9: Modified Newton-Raphson
+        for iteration in range(1, max_iter + 1):
+            # Appendix step 4: compute score and Hessian at theta(i)
+            q = compute_logistic_quantities(X, y, theta, sample_weight, offset)
+
+            # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
+            F = q.modified_score.copy()
+            F[idx] = q.loglik - l_star
+
+            # Appendix step 9: check convergence
+            if np.max(np.abs(F)) <= tol:
+                return theta[idx], True, iteration
+
+            # D = d2l/dtheta2 at current theta (Appendix step 4)
+            D = -q.fisher_info
+            G = D.copy()
+            G[idx, :] = q.modified_score  # Jacobian (Eq. 3)
+
+            # Appendix step 6: v = G^-1 F (direction to subtract)
+            try:
+                G_inv = np.linalg.inv(G)
+                v = G_inv @ F
+            except np.linalg.LinAlgError:
+                v = cast(NDArray[np.float64], np.linalg.lstsq(G, F, rcond=None)[0])
+                try:
+                    G_inv = np.linalg.pinv(G)
+                except np.linalg.LinAlgError:
+                    # singular G; take damped step (pg 92)
+                    theta = theta - 0.1 * v
+                    continue
+
+            # Appendix step 7: quadratic correction
+            # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)
+            g_j = G_inv[:, idx]
+            a = g_j @ D @ g_j
+            b = 2 * v @ D @ g_j - 2
+            c = v @ D @ v
+
+            discriminant = b * b - 4 * a * c
+
+            if discriminant >= 0 and abs(a) > 1e-10:
+                sqrt_disc = np.sqrt(discriminant)
+                s1 = (-b + sqrt_disc) / (2 * a)
+                s2 = (-b - sqrt_disc) / (2 * a)
+
+                # Pick root giving smaller step (pg 90)
+                step1 = -v - s1 * g_j
+                step2 = -v - s2 * g_j
+                norm1 = step1 @ (-D0) @ step1
+                norm2 = step2 @ (-D0) @ step2
+
+                s = s1 if norm1 < norm2 else s2
+                delta = -v - s * g_j  # Eq. 9
+            else:
+                # No real roots: damped step (pg 92)
+                delta = -0.1 * v
+
+            # Appendix step 8: theta(i+1) = theta(i) + delta
+            theta = theta + delta
+
+        # failed to converge
+        return theta[idx], False, max_iter
 
     def lrt(
         self,
@@ -274,42 +503,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         array([0.00020841,        nan, 0.02363857,        nan])
         """
         check_is_fitted(self)
-
-        # normalize input to a list of indices
-        n_coef = len(self.coef_)
-        if features is None:
-            indices = list(range(n_coef))
-            if self.fit_intercept:
-                indices.append(n_coef)  # intercept index
-        else:
-            features_seq = (
-                [features] if isinstance(features, (int, np.integer, str)) else features
-            )
-            indices = []
-            for feat in features_seq:
-                if isinstance(feat, str):
-                    if feat == "intercept":
-                        indices.append(n_coef)
-                    else:
-                        indices.append(self._feature_name_to_index(feat))
-                elif isinstance(feat, (int, np.integer)):
-                    indices.append(feat)
-                else:
-                    raise TypeError(
-                        f"Elements of `features` must be int or str, but got {type(feat)}"
-                    )
-
-        if n_coef in indices and not self.fit_intercept:
-            raise ValueError("Cannot test intercept when fit_intercept=False")
+        indices = self._resolve_feature_indices(features)
 
         # compute LRT
         for idx in indices:
-            if idx == n_coef:  # intercept
-                if np.isnan(self.intercept_lrt_pvalue_):
-                    self._compute_single_lrt(idx)
-            else:
-                if np.isnan(self.lrt_pvalues_[idx]):
-                    self._compute_single_lrt(idx)
+            if np.isnan(self.lrt_pvalues_[idx]):
+                self._compute_single_lrt(idx)
         return self
 
     def _feature_name_to_index(self, name: str) -> int:
@@ -367,12 +566,41 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
         bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
 
-        if idx == len(self.coef_):
-            self.intercept_lrt_pvalue_ = pval
-            self.intercept_lrt_bse_ = bse
-        else:
-            self.lrt_pvalues_[idx] = pval
-            self.lrt_bse_[idx] = bse
+        self.lrt_pvalues_[idx] = pval
+        self.lrt_bse_[idx] = bse
+
+    def _resolve_feature_indices(
+        self,
+        features: int | str | Sequence[int | str] | None,
+    ) -> list[int]:
+        """Convert feature names and/or indices to list of parameter indices."""
+        n_coef = len(self.coef_)
+        n_params = n_coef + 1 if self.fit_intercept else n_coef
+
+        if features is None:
+            return list(range(n_params))
+
+        features_seq = (
+            [features] if isinstance(features, (int, np.integer, str)) else features
+        )
+        indices = []
+        for feat in features_seq:
+            if isinstance(feat, str):
+                if feat == "intercept":
+                    indices.append(n_coef)
+                else:
+                    indices.append(self._feature_name_to_index(feat))
+            elif isinstance(feat, (int, np.integer)):
+                indices.append(int(feat))
+            else:
+                raise TypeError(
+                    f"Elements of `features` must be int or str, got {type(feat)}"
+                )
+
+        if n_coef in indices and not self.fit_intercept:
+            raise ValueError("Cannot specify intercept when fit_intercept=False")
+
+        return indices
 
     def decision_function(
         self,

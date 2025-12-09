@@ -9,11 +9,12 @@ class TestFirthLogisticRegression:
     """Tests for FirthLogisticRegression."""
 
     def test_matches_logistf_with_separation(self, separation_data):
-        """Coefficients and inference match logistf on quasi-separated data."""
+        """Matches logistf on quasi-separated data."""
         X, y = separation_data
         model = FirthLogisticRegression()
         model.fit(X, y)
         model.lrt()
+        ci = model.conf_int(alpha=0.05, method="pl")
 
         # coefficients
         expected_intercept = -0.4434562830
@@ -25,32 +26,37 @@ class TestFirthLogisticRegression:
         assert model.converged_
 
         # Wald
-        expected_intercept_wald_bse = 0.3452906671
         expected_wald_bse = np.array(
-            [1.4822786334, 0.2687886213, 0.3874453554, 0.1370778814]
-        )
-        np.testing.assert_allclose(
-            model.intercept_bse_, expected_intercept_wald_bse, rtol=1e-4
+            [1.4822786334, 0.2687886213, 0.3874453554, 0.1370778814, 0.3452906671]
         )
         np.testing.assert_allclose(model.bse_, expected_wald_bse, rtol=1e-4)
 
         # LRT
         expected_lrt_pvalues = np.array(
-            [0.0002084147149, 0.0093173148959, 0.0236385713206, 0.0055887969164]
+            [
+                0.0002084147149,
+                0.0093173148959,
+                0.0236385713206,
+                0.0055887969164,
+                0.1997147194,
+            ]
         )
         expected_lrt_bse = np.array(
-            [0.9862809793, 0.2599729631, 0.3814979166, 0.1221874315]
+            [0.9862809793, 0.2599729631, 0.3814979166, 0.1221874315, 0.3458113448]
         )
-        expected_intercept_lrt_pvalue = 0.1997147194
-        expected_intercept_lrt_bse = 0.3458113448
         np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-4)
         np.testing.assert_allclose(model.lrt_bse_, expected_lrt_bse, rtol=1e-4)
-        np.testing.assert_allclose(
-            model.intercept_lrt_pvalue_, expected_intercept_lrt_pvalue, rtol=1e-4
+
+        # profile CI
+        expected_lower = np.array(
+            [1.3901042899, 0.1602568036, -1.6677883758, 0.0893054012, -1.16089382506]
         )
-        np.testing.assert_allclose(
-            model.intercept_lrt_bse_, expected_intercept_lrt_bse, rtol=1e-4
+        expected_upper = np.array(
+            [8.5876062114, 1.2568999211, -0.1135186948, 0.6572681313, 0.2295139209]
         )
+
+        np.testing.assert_allclose(ci[:, 0], expected_lower, rtol=1e-4)
+        np.testing.assert_allclose(ci[:, 1], expected_upper, rtol=1e-4)
 
     def test_fit_intercept_false(self, separation_data):
         """Fits without intercept."""
