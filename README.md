@@ -1,8 +1,11 @@
 # firthmodels
 
 [![CI](https://github.com/jzluo/firthmodels/actions/workflows/ci.yml/badge.svg)](https://github.com/jzluo/firthmodels/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/firthmodels)](https://pypi.org/project/firthmodels/)
+![Pepy Total Downloads](https://img.shields.io/pepy/dt/firthmodels)
 ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fjzluo%2Ffirthmodels%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 ![GitHub License](https://img.shields.io/github/license/jzluo/firthmodels)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17863281.svg)](https://doi.org/10.5281/zenodo.17863281)
 
 
 Firth-penalized logistic regression in Python.
@@ -142,7 +145,7 @@ model.fit(X, y, offset=offset)
 
 Current implementation uses a damped Newton–Raphson solver.
 
-Add additional solvers (IRLS, L-BFGS, etc) and models (Cox proportional hazards).
+Add additional solvers (eg IRLS) and models (Cox proportional hazards).
 
 ## References
 
