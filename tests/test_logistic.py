@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 from sklearn.utils.estimator_checks import estimator_checks_generator
@@ -108,3 +110,13 @@ class TestFirthLogisticRegression:
         assert not np.isnan(model.lrt_pvalues_[1])
         assert np.isnan(model.lrt_pvalues_[2])
         assert not np.isnan(model.lrt_pvalues_[3])
+
+    def test_no_warning_when_halfstep_disabled(self):
+        """max_halfstep=0 should not produce step-halving warnings."""
+        X = np.array([[0], [0], [0], [1], [1], [1]], dtype=float)
+        y = np.array([0, 0, 0, 1, 1, 1])
+
+        model = FirthLogisticRegression(max_halfstep=0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.fit(X, y)

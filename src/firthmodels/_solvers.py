@@ -67,20 +67,29 @@ def newton_raphson(
         if max_delta > max_step:
             delta = delta * (max_step / max_delta)
 
-        # step-halving until loglik increases (deviance decreases)
-        step_factor = 1.0
-        for _ in range(max_halfstep):
-            beta_new = beta + step_factor * delta
-            q_new = compute_quantities(beta_new)
+        # Try full step first
+        beta_new = beta + delta
+        q_new = compute_quantities(beta_new)
 
-            if q_new.loglik >= q.loglik:
+        if q_new.loglik >= q.loglik or max_halfstep == 0:
+            beta = beta_new
+        else:
+            # Step-halving until loglik improves
+            step_factor = 0.5
+            for _ in range(max_halfstep):
+                beta_new = beta + step_factor * delta
+                q_new = compute_quantities(beta_new)
+                if q_new.loglik >= q.loglik:
+                    beta = beta_new
+                    break
+                step_factor *= 0.5
+            else:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
                 beta = beta_new
-                break
-            step_factor *= 0.5
-        else:  # step-halving failed
-            warning_msg = "Step-halving failed to converge."
-            warnings.warn(warning_msg, ConvergenceWarning, stacklevel=2)
-            beta = beta + step_factor * delta
 
     # max_iter reached without convergence
     q = compute_quantities(beta)
