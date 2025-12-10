@@ -70,6 +70,7 @@ jobs:
             if uv pip install --system --refresh \
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
+              --index-strategy unsafe-best-match \
               "firthmodels==$VERSION"; then
               exit 0
             fi
