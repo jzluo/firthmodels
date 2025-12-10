@@ -71,10 +71,7 @@ def newton_raphson(
         beta_new = beta + delta
         q_new = compute_quantities(beta_new)
 
-        if q_new.loglik >= q.loglik:
-            beta = beta_new
-        elif max_halfstep == 0:
-            # No halvings allowed, take full step anyway
+        if q_new.loglik >= q.loglik or max_halfstep == 0:
             beta = beta_new
         else:
             # Step-halving until loglik improves
