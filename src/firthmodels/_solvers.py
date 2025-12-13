@@ -41,10 +41,9 @@ def newton_raphson(
         Result of Firth-penalized optimization
     """
     beta = np.zeros(n_features, dtype=np.float64)
+    q = compute_quantities(beta)
 
     for iteration in range(1, max_iter + 1):
-        q = compute_quantities(beta)
-
         # check convergence: max|U*| < tol
         if np.max(np.abs(q.modified_score)) < tol:
             return FirthResult(
@@ -73,6 +72,7 @@ def newton_raphson(
 
         if q_new.loglik >= q.loglik or max_halfstep == 0:
             beta = beta_new
+            q = q_new
         else:
             # Step-halving until loglik improves
             step_factor = 0.5
@@ -81,6 +81,7 @@ def newton_raphson(
                 q_new = compute_quantities(beta_new)
                 if q_new.loglik >= q.loglik:
                     beta = beta_new
+                    q = q_new
                     break
                 step_factor *= 0.5
             else:
@@ -90,9 +91,8 @@ def newton_raphson(
                     stacklevel=2,
                 )
                 beta = beta_new
-
+                q = q_new
     # max_iter reached without convergence
-    q = compute_quantities(beta)
     warning_msg = "Maximum number of iterations reached without convergence."
     warnings.warn(warning_msg, ConvergenceWarning, stacklevel=2)
 
