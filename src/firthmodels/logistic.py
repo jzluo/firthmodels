@@ -735,9 +735,9 @@ def compute_logistic_quantities(
     fisher_info_aug = XtW_aug @ XtW_aug.T
 
     # L*(β) = Σ weight_i * [y_i*log(p_i) + (1-y_i)*log(1-p_i)] + 0.5*log|I(β)|
-    loglik = (
-        np.sum(sample_weight * (y * np.log(p) + (1 - y) * np.log(1 - p))) + 0.5 * logdet
-    )
+    # y*log(p) + (1-y)*log(1-p) = y*eta - log(1+exp(eta))
+    # avoids log(0) when p>-0 or p->1
+    loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
 
     # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
     residual = sample_weight * (y - p) + h * (0.5 - p)
