@@ -707,20 +707,27 @@ def compute_logistic_quantities(
     XtW = X.T * sqrt_w  # (k, n) broadcast so we don't materialize (n, n) diag matrix
     fisher_info = XtW @ XtW.T
 
-    # hat diag
+    # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
     try:
+        k = fisher_info.shape[0]
         cho = scipy.linalg.cho_factor(fisher_info)
-        solved = scipy.linalg.cho_solve(cho, XtW)  # (k, n)
+        inv_fisher_info = scipy.linalg.cho_solve(
+            cho,
+            np.eye(k, dtype=np.float64),
+        )
         L = cho[0]
         logdet = 2.0 * np.sum(np.log(np.diag(L)))
-    except scipy.linalg.LinAlgError:
+        solved = inv_fisher_info @ XtW
+        h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
+    except (
+        scipy.linalg.LinAlgError
+    ):  # fisher info not positive definite - fall back to pinv
         solved, *_ = np.linalg.lstsq(fisher_info, XtW, rcond=None)
-        # fallback to slogdet
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
             # use -inf so loglik approaches -inf
             logdet = -np.inf
-    h = np.sum(solved * XtW, axis=0)
+        h = np.einsum("ij,ij->j", solved, XtW)
 
     # augmented fisher information
     w_aug = (sample_weight + h) * p * (1 - p)
