@@ -156,7 +156,7 @@ Heinze G, Schemper M (2002). A solution to the problem of separation in logistic
 Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
 quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
 
-Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing Profile-Likelihood-Based Confidence Intervals." Applied Statistics, 37(1), 87-94.
+Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing Profile-Likelihood-Based Confidence Intervals." *Applied Statistics*, 37(1), 87-94.
 
 ## License
 
