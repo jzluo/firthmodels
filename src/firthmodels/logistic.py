@@ -732,7 +732,6 @@ def compute_logistic_quantities(
         L = cho[0]
         logdet = 2.0 * np.sum(np.log(np.diag(L)))
         solved = inv_fisher_info @ XtW
-        h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
     except (
         scipy.linalg.LinAlgError
     ):  # fisher info not positive definite - fall back to pinv
@@ -741,7 +740,8 @@ def compute_logistic_quantities(
         if sign <= 0:
             # use -inf so loglik approaches -inf
             logdet = -np.inf
-        h = np.einsum("ij,ij->j", solved, XtW)
+
+    h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
 
     # augmented fisher information
     w_aug = (sample_weight + h) * p * (1 - p)
