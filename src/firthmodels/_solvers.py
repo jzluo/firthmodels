@@ -56,8 +56,8 @@ def newton_raphson(
 
         # solve for step: delta = (X'WX)^(-1) @ U*
         try:
-            cho = scipy.linalg.cho_factor(q.fisher_info)
-            delta = scipy.linalg.cho_solve(cho, q.modified_score)
+            cho = scipy.linalg.cho_factor(q.fisher_info, lower=True, check_finite=False)
+            delta = scipy.linalg.cho_solve(cho, q.modified_score, check_finite=False)
         except scipy.linalg.LinAlgError:
             delta, *_ = np.linalg.lstsq(q.fisher_info, q.modified_score, rcond=None)
 
