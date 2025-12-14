@@ -90,8 +90,13 @@ def newton_raphson(
                     ConvergenceWarning,
                     stacklevel=2,
                 )
-                beta = beta_new
-                q = q_new
+                return FirthResult(  # step-halving failed, return early
+                    beta=beta,
+                    loglik=q.loglik,
+                    fisher_info=q.fisher_info,
+                    n_iter=iteration,
+                    converged=False,
+                )
     # max_iter reached without convergence
     warning_msg = "Maximum number of iterations reached without convergence."
     warnings.warn(warning_msg, ConvergenceWarning, stacklevel=2)
