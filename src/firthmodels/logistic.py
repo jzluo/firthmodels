@@ -725,7 +725,7 @@ def compute_logistic_quantities(
     # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
     try:
         k = fisher_info.shape[0]
-        cho = scipy.linalg.cho_factor(fisher_info, check_finite=False)
+        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
         inv_fisher_info = scipy.linalg.cho_solve(
             cho, np.eye(k, dtype=np.float64), check_finite=False
         )
