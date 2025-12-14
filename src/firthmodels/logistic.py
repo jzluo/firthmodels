@@ -9,7 +9,12 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils._tags import Tags, ClassifierTags
 from sklearn.utils.multiclass import type_of_target
-from sklearn.utils.validation import check_is_fitted, validate_data
+from sklearn.utils.validation import (
+    _check_sample_weight,
+    check_array,
+    check_is_fitted,
+    validate_data,
+)
 from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
@@ -146,16 +151,26 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         """
         # === Validate and prep inputs ===
         X, y = self._validate_input(X, y)
-        sample_weight = (
-            np.ones(X.shape[0], dtype=np.float64)
-            if sample_weight is None
-            else np.asarray(sample_weight, dtype=np.float64)
+        sample_weight = cast(
+            NDArray[np.float64],
+            _check_sample_weight(
+                sample_weight, X, dtype=np.float64, ensure_non_negative=True
+            ),
         )
-        offset = (
-            np.zeros(X.shape[0], dtype=np.float64)
-            if offset is None
-            else np.asarray(offset, dtype=np.float64)
-        )
+        if offset is None:
+            offset = np.zeros(X.shape[0], dtype=np.float64)
+        else:
+            offset = cast(
+                NDArray[np.float64],
+                check_array(
+                    offset, ensure_2d=False, dtype=np.float64, input_name="offset"
+                ),
+            )
+            if offset.shape[0] != X.shape[0]:
+                raise ValueError(
+                    f"Length of offset ({offset.shape[0]}) does not match "
+                    f"number of samples ({X.shape[0]})"
+                )
 
         if self.fit_intercept:
             X = np.column_stack([X, np.ones(X.shape[0])])
