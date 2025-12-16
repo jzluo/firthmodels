@@ -1,6 +1,16 @@
 import numpy as np
 
+from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
+
+
+@dataclass
+class CoxQuantities:
+    """Quantities needed for one Newton–Raphson iteration."""
+
+    loglik: float
+    modified_score: NDArray[np.float64]
+    fisher_info: NDArray[np.float64]
 
 
 def _validate_survival_y(
