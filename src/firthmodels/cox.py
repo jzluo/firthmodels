@@ -1,10 +1,13 @@
 import numpy as np
+import scipy
 
 from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted, validate_data
 from typing import Self, cast
+
+from firthmodels._solvers import newton_raphson
 
 
 class FirthCoxPH(BaseEstimator):
@@ -43,7 +46,7 @@ class FirthCoxPH(BaseEstimator):
 
     References
     ----------
-    Heinze, G, Schemper, M. (2001). A Solution to the Problem of Monotone
+    Heinze, G., Schemper, M. (2001). A Solution to the Problem of Monotone
     Likelihood in Cox Regression. Biometrics 57(1):114-119.
     """
 
@@ -83,15 +86,44 @@ class FirthCoxPH(BaseEstimator):
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
 
-        # TODO: precomputation (sort, identify event blocks)
-        # TODO: call newton_raphson with compute_cox_quantities closure
-        # TODO: extract results, compute Wald SEs
+        # Precompute sorted data and block structure
+        data = _CoxPrecomputed.from_data(X, time, event)
 
-        raise NotImplementedError("fit() not yet implemented")
+        # Create closure for newton_raphson
+        def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
+            return compute_cox_quantities(beta, data)
+
+        # Run optimizer
+        result = newton_raphson(
+            compute_quantities=quantities,
+            n_features=data.n_features,
+            max_iter=self.max_iter,
+            max_step=self.max_step,
+            max_halfstep=self.max_halfstep,
+            tol=self.tol,
+        )
+
+        self.coef_ = result.beta
+        self.loglik_ = result.loglik
+        self.n_iter_ = result.n_iter
+        self.converged_ = result.converged
+
+        # Wald
+        try:
+            cov = np.linalg.inv(result.fisher_info)
+            self.bse_ = np.sqrt(np.diag(cov))
+        except np.linalg.LinAlgError:
+            self.bse_ = np.full(data.n_features, np.nan)
+
+        z = result.beta / self.bse_
+        self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
+
+        return self
 
     def predict(self, X: ArrayLike) -> NDArray[np.float64]:
         check_is_fitted(self)
         X = validate_data(self, X, dtype=np.float64, reset=False)
+        X = cast(NDArray[np.float64], X)
         return X @ self.coef_
 
 
@@ -168,7 +200,7 @@ class _CoxPrecomputed:
 
         Returns
         -------
-        CoxData
+        _CoxPrecomputed
             Precomputed data for likelihood evaluation.
         """
         # d = number of deaths at time t
@@ -276,3 +308,129 @@ def _validate_survival_y(
         raise ValueError("At least one event is required to fit a Cox model.")
 
     return event, time
+
+
+def compute_cox_quantities(
+    beta: NDArray[np.float64],
+    data: _CoxPrecomputed,
+) -> CoxQuantities:
+    """
+    Compute all quantities needed for one Newton-Raphson iteration.
+
+    Parameters
+    ----------
+    beta : ndarray, shape (n_features,)
+        Current coefficient estimates.
+    data : _CoxPrecomputed
+        Precomputed data from _CoxPrecomputed.from_data().
+
+    Returns
+    -------
+    CoxQuantities
+        Penalized log-likelihood, modified score, and Fisher information.
+    """
+    X = data.X
+    block_ends = data.block_ends
+    block_d = data.block_d
+    block_s = data.block_s
+    n_blocks = data.n_blocks
+    k = data.n_features
+
+    # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
+    # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
+    eta = X @ beta
+    c = np.max(eta)
+    risk = np.exp(eta - c)
+
+    # Initialize (scaled) risk-set sums computed with risk = exp(eta - c).
+    S0 = 0.0
+    S1 = np.zeros(k, dtype=np.float64)
+    S2 = np.zeros((k, k), dtype=np.float64)
+    S3 = np.zeros((k, k, k), dtype=np.float64)
+
+    loglik = 0.0
+    score = np.zeros(k, dtype=np.float64)
+    fisher_info = np.zeros((k, k), dtype=np.float64)
+    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
+    # dI_dbeta[t, r, s] = dI_rs / d beta_t.
+
+    # Walk blocks in descending time order
+    start = 0
+    for b in range(n_blocks):
+        end = block_ends[b]
+
+        block_X = X[start:end]
+        block_risk = risk[start:end]
+
+        # update risk-set sums (everyone in the block enters the risk set)
+        S0 += block_risk.sum()
+        S1 += block_X.T @ block_risk
+        S2 += (block_X * block_risk[:, None]).T @ block_X
+        S3 += np.einsum(
+            "i,ir,is,it->rst",
+            block_risk,
+            block_X,
+            block_X,
+            block_X,
+            optimize=True,
+        )
+
+        d = block_d[b]
+        if d == 0:
+            start = end
+            continue
+
+        s = block_s[b]
+        S0_inv = 1.0 / S0
+        # Risk-set weighted mean covariate vector.
+        x_bar = S1 * S0_inv
+
+        # Add c to undo the scaling exp(eta - c) in the risk-set sum.
+        loglik += beta @ s - d * (c + np.log(S0))
+
+        score += s - d * x_bar
+
+        # Fisher info using the paper's weighted-covariance form.
+        # Section 2: each event time contributes d_j times the weighted covariance of X
+        # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
+        V = S2 * S0_inv - np.outer(x_bar, x_bar)
+        fisher_info += d * V
+
+        # dI/d beta for Firth correction (Section 2 of paper).
+        # We implement the per-block contribution using S0/S1/S2/S3 and V, where
+        # V_{rt} = S_{rt}/S0 - S_r S_t/S0^2.
+        S0_inv2 = S0_inv * S0_inv
+        term1 = S3.transpose(2, 0, 1) * S0_inv - (  # S3 is (r,s,t)
+            np.einsum("rs,t->trs", S2, S1, optimize=True) * S0_inv2
+        )
+        term2 = np.einsum("s,rt->trs", S1 * S0_inv, V, optimize=True)
+        term3 = np.einsum("r,st->trs", S1 * S0_inv, V, optimize=True)
+        dI_dbeta += d * (term1 - term2 - term3)
+
+        start = end
+
+    # log|I| and I^{-1} for Firth correction
+    try:
+        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
+        logdet = 2.0 * np.sum(np.log(np.diag(cho[0])))
+        inv_fisher_info = scipy.linalg.cho_solve(
+            cho, np.eye(k, dtype=np.float64), check_finite=False
+        )
+    except scipy.linalg.LinAlgError:
+        sign, logdet = np.linalg.slogdet(fisher_info)
+        if sign <= 0:
+            logdet = -np.inf
+        inv_fisher_info = np.linalg.pinv(fisher_info)
+
+    # Firth correction: a_t = 0.5 * trace(I^{-1} * dI/d beta_t).
+    firth_correction = 0.5 * np.einsum(
+        "rs,trs->t", inv_fisher_info, dI_dbeta, optimize=True
+    )
+    modified_score = score + firth_correction
+    loglik = loglik + 0.5 * logdet
+
+    return CoxQuantities(
+        loglik=loglik,
+        modified_score=modified_score,
+        fisher_info=fisher_info,
+    )
