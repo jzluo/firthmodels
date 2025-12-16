@@ -27,3 +27,39 @@ def make_separation_data(seed=42, n=100):
 @pytest.fixture
 def separation_data():
     return make_separation_data()
+
+
+def make_cox_separation_data(seed=42, n=100):
+    """Generate survival data with monotone likelihood for testing."""
+    rng = np.random.default_rng(seed)
+
+    separator = rng.choice([0, 1], n, p=[0.35, 0.65])  # only affects censoring
+    x1 = rng.standard_normal(n)
+    x2 = rng.uniform(-1, 1, n)
+    x3 = rng.choice([0, 1], n, p=[0.6, 0.4])
+
+    X = np.column_stack([separator, x1, x2, x3])
+
+    # Generate survival times from Cox model
+    beta = np.array([0.0, 0.5, -0.3, 0.7])
+    eta = X @ beta
+
+    baseline_hazard = 0.1
+    survival_time = rng.exponential(1 / (baseline_hazard * np.exp(eta)))
+
+    # Random censoring
+    censor_time = rng.exponential(scale=15.0, size=n)
+
+    time = np.minimum(survival_time, censor_time)
+    event = survival_time <= censor_time
+
+    # All events in separator=0 group become censored
+    event[separator == 0] = False
+
+    return X, time, event.astype(bool)
+
+
+@pytest.fixture
+def cox_separation_data():
+    """Fixture providing survival data with monotone likelihood."""
+    return make_cox_separation_data()
