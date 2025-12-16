@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from firthmodels.cox import _CoxPrecomputed, _validate_survival_y
+from firthmodels.cox import FirthCoxPH, _CoxPrecomputed, _validate_survival_y
 
 
 def _structured_y(event: np.ndarray, time: np.ndarray) -> np.ndarray:
@@ -70,3 +70,19 @@ class TestCoxPrecomputed:
             ]
         )
         np.testing.assert_allclose(pre.block_s, expected_block_s)
+
+
+class TestFirthCoxPH:
+    def test_two_individual_example_matches_log3(self):
+        # (Heinze and Schemper, 2001), Section 2: two individuals, one covariate.
+        # The modified score has root exp(beta_hat) = 3.
+        X = np.array([[1.0], [0.0]])
+        time = np.array([1.0, 2.0])
+        event = np.array([True, False])
+        y = _structured_y(event, time)
+
+        model = FirthCoxPH(max_iter=200, tol=1e-10)
+        model.fit(X, y)
+
+        assert model.converged_
+        np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
