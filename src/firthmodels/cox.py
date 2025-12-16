@@ -2,15 +2,106 @@ import numpy as np
 
 from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
+from sklearn.base import BaseEstimator
+from sklearn.utils.validation import check_is_fitted, validate_data
+from typing import Self, cast
+
+
+class FirthCoxPH(BaseEstimator):
+    """
+    Cox proportional hazards with Firth's bias reduction.
+
+    Parameters
+    ----------
+    max_iter : int, default=25
+        Maximum number of Newton-Raphson iterations.
+    max_step : float, default=5.0
+        Maximum step size per coefficient.
+    max_halfstep : int, default=25
+        Maximum number of step-halvings per iteration.
+    tol : float, default=1e-4
+        Tolerance for stopping criteria
+
+    Attributes
+    ----------
+    coef_ : ndarray of shape (n_features,)
+        Fitted coefficients.
+    loglik_ : float
+        Fitted penalized log partial likelihood.
+    n_iter_ : int
+        Number of iterations run.
+    converged_ : bool
+        Whether the solver converged within `max_iter`.
+    bse_ : ndarray of shape (n_features,)
+        Wald standard errors.
+    pvalues_ : ndarray of shape (n_features,)
+        Wald p-values.
+    n_features_in_ : int
+        Number of features seen during fit.
+    feature_names_in_ : ndarray of shape (n_features_in_,)
+        Names of features seen during fit (if X has feature names).
+
+    References
+    ----------
+    Heinze, G. and Schemper, M. (2001). A Solution to the Problem of Monotone
+    Likelihood in Cox Regression. Biometrics 57(1):114-119.
+    """
+
+    def __init__(
+        self,
+        max_iter: int = 25,
+        max_step: float = 5.0,
+        max_halfstep: int = 25,
+        tol: float = 1e-4,
+    ) -> None:
+        self.max_iter = max_iter
+        self.max_step = max_step
+        self.max_halfstep = max_halfstep
+        self.tol = tol
+
+    def fit(self, X: ArrayLike, y: ArrayLike) -> Self:
+        """
+        Fit the Firth-penalized Cox model.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        y : array-like or tuple
+            Survival outcome encoding. Accepts either:
+            - a NumPy structured array with fields `("event", "time")` (scikit-survival
+            convention), or
+            - a two-tuple `(event, time)` where `event` is a bool array indicating whether
+            the event occurred, and `time` is the observed time (event or censoring).
+
+        Returns
+        -------
+        self : FirthCoxPH
+            Fitted estimator.
+        """
+        X = validate_data(self, X, dtype=np.float64, ensure_min_samples=2)
+        X = cast(NDArray[np.float64], X)
+        event, time = _validate_survival_y(y, n_samples=X.shape[0])
+
+        # TODO: precomputation (sort, identify event blocks)
+        # TODO: call newton_raphson with compute_cox_quantities closure
+        # TODO: extract results, compute Wald SEs
+
+        raise NotImplementedError("fit() not yet implemented")
+
+    def predict(self, X: ArrayLike) -> NDArray[np.float64]:
+        check_is_fitted(self)
+        X = validate_data(self, X, dtype=np.float64, reset=False)
+        return X @ self.coef_
 
 
 @dataclass
 class CoxQuantities:
-    """Quantities needed for one Newton–Raphson iteration."""
+    """Quantities needed for one Newton-Raphson iteration."""
 
     loglik: float
-    modified_score: NDArray[np.float64]
-    fisher_info: NDArray[np.float64]
+    modified_score: NDArray[np.float64]  # shape (n_features,)
+    fisher_info: NDArray[np.float64]  # shape (n_features, n_features)
 
 
 def _validate_survival_y(
