@@ -43,7 +43,7 @@ class FirthCoxPH(BaseEstimator):
 
     References
     ----------
-    Heinze, G. and Schemper, M. (2001). A Solution to the Problem of Monotone
+    Heinze, G, Schemper, M. (2001). A Solution to the Problem of Monotone
     Likelihood in Cox Regression. Biometrics 57(1):114-119.
     """
 
@@ -102,6 +102,114 @@ class CoxQuantities:
     loglik: float
     modified_score: NDArray[np.float64]  # shape (n_features,)
     fisher_info: NDArray[np.float64]  # shape (n_features, n_features)
+
+
+@dataclass(frozen=True)
+class _CoxPrecomputed:
+    """
+    Precomputed data for Cox likelihood evaluation.
+
+    Samples are sorted by descending time and partitioned into blocks of equal time.
+    Risk-set sums can then be computed in a single backward pass.
+
+    Attributes
+    ----------
+    X : ndarray, shape (n_samples, n_features)
+        Feature matrix sorted by time descending.
+    time : ndarray, shape (n_samples,)
+        Observed times, sorted descending.
+    event : ndarray, shape (n_samples,)
+        Event indicators, sorted descending.
+    block_ends : ndarray, shape (n_blocks,)
+        End index (exclusive) of each time block in the sorted arrays.
+    block_d : ndarray, shape (n_blocks,)
+        Number of events in each block.
+    block_s : ndarray, shape (n_blocks, n_features)
+        Sum of features over events in each block.
+    """
+
+    X: NDArray[np.float64]
+    time: NDArray[np.float64]
+    event: NDArray[np.bool_]
+    block_ends: NDArray[np.intp]
+    block_d: NDArray[np.intp]
+    block_s: NDArray[np.float64]
+
+    @property
+    def n_samples(self) -> int:
+        return self.X.shape[0]
+
+    @property
+    def n_features(self) -> int:
+        return self.X.shape[1]
+
+    @property
+    def n_blocks(self) -> int:
+        return len(self.block_ends)
+
+    @classmethod
+    def from_data(
+        cls,
+        X: NDArray[np.float64],
+        time: NDArray[np.float64],
+        event: NDArray[np.bool_],
+    ) -> Self:
+        """
+        Sort samples and compute block structure.
+
+        Parameters
+        ----------
+        X : ndarray, shape (n_samples, n_features)
+            Feature matrix.
+        time : ndarray, shape (n_samples,)
+            Observed times.
+        event : ndarray, shape (n_samples,)
+            Event indicators.
+
+        Returns
+        -------
+        CoxData
+            Precomputed data for likelihood evaluation.
+        """
+        # d = number of deaths at time t
+        # s = vector sum of the covariates of the d individuals
+        n, k = X.shape
+
+        # Sort by time descending (stable sort for reproducibility with ties)
+        order = np.argsort(-time, kind="stable")
+        X = X[order]
+        time = time[order]
+        event = event[order]
+
+        # Identify block boundaries (blocks are contiguous runs of equal time)
+        # Note that np.diff(time) assumes exact equality for ties. If there are floating
+        # point differences like 1.0 and 1.0 + 1e-15, they will be treated as different
+        # times. So floating point times should be rounded appropriately before fitting.
+        time_changes = np.flatnonzero(np.diff(time)) + 1
+        block_ends = np.concatenate([time_changes, [n]])
+
+        # Compute per-block event counts and covariate sums
+        n_blocks = len(block_ends)
+        block_d = np.zeros(n_blocks, dtype=np.intp)
+        block_s = np.zeros((n_blocks, k), dtype=np.float64)
+
+        start = 0
+        for b in range(n_blocks):
+            end = block_ends[b]
+            event_mask = event[start:end]
+            block_d[b] = event_mask.sum()
+            if block_d[b] > 0:
+                block_s[b] = X[start:end][event_mask].sum(axis=0)
+            start = end
+
+        return cls(
+            X=X,
+            time=time,
+            event=event,
+            block_ends=block_ends,
+            block_d=block_d,
+            block_s=block_s,
+        )
 
 
 def _validate_survival_y(
