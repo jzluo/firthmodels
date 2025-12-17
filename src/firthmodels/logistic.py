@@ -337,6 +337,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 if self.fit_intercept
                 else self.coef_
             )
+            D0 = -compute_quantities_full(theta_hat).fisher_info  # hessian at MLE
             for idx in indices:
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
@@ -350,6 +351,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                             tol=tol,
                             chi2_crit=chi2_crit,
                             compute_quantities_full=compute_quantities_full,
+                            D0=D0,
                         )
 
                         if result.converged:
