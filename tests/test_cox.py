@@ -3,8 +3,8 @@ import pytest
 
 from firthmodels.cox import (
     FirthCoxPH,
-    _CoxPrecomputed,
     _concordance_index,
+    _CoxPrecomputed,
     _validate_survival_y,
     compute_cox_quantities,
 )

@@ -1,13 +1,14 @@
+import warnings
+from dataclasses import dataclass
+from typing import Literal, Self, Sequence, cast
+
 import numpy as np
 import scipy
-import warnings
-
-from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.utils._tags import Tags, ClassifierTags
+from sklearn.utils._tags import ClassifierTags, Tags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import (
     _check_sample_weight,
@@ -15,11 +16,10 @@ from sklearn.utils.validation import (
     check_is_fitted,
     validate_data,
 )
-from typing import Literal, Self, Sequence, cast
 
-from firthmodels._solvers import newton_raphson
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
+from firthmodels._solvers import newton_raphson
 from firthmodels._utils import resolve_feature_indices
 
 

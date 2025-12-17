@@ -1,10 +1,10 @@
-import scipy
 import warnings
+from typing import Callable
 
 import numpy as np
+import scipy
 from numpy.typing import NDArray
 from sklearn.exceptions import ConvergenceWarning
-from typing import Callable
 
 from firthmodels._utils import FirthResult, IterationQuantities
 

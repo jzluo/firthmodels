@@ -1,9 +1,10 @@
-from dataclasses import dataclass
-import numpy as np
-from numpy.typing import NDArray
-from typing import Callable
-import scipy
 import math
+from dataclasses import dataclass
+from typing import Callable
+
+import numpy as np
+import scipy
+from numpy.typing import NDArray
 
 from firthmodels._solvers import newton_raphson
 from firthmodels._utils import IterationQuantities
