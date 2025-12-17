@@ -18,6 +18,7 @@ from sklearn.utils.validation import (
 from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
+from firthmodels._lrt import constrained_lrt_1df
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -558,24 +559,25 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         """
         X, y, sample_weight, offset = self._fit_data
 
-        # fit all indices except for the feature being tested
-        free_indices = [i for i in range(X.shape[1]) if i != idx]
-
-        # Wrapper so the solver only optimizes the k-1 "free" parameters.
-        # Reconstructs full k-vector, computes quantities with full Fisher,
-        # then slices score and Fisher to k-1 dimensions before returning to the solver.
-        def constrained_quantities(beta_free):
-            beta_full = np.insert(beta_free, idx, 0.0)
-            q = compute_logistic_quantities(X, y, beta_full, sample_weight, offset)
-            return LogisticQuantities(
-                loglik=q.loglik,
-                modified_score=q.modified_score[free_indices],
-                fisher_info=q.fisher_info[np.ix_(free_indices, free_indices)],
+        def compute_quantities_full(beta):
+            return compute_logistic_quantities(
+                X=X,
+                y=y,
+                beta=beta,
+                sample_weight=sample_weight,
+                offset=offset,
             )
 
-        result = newton_raphson(
-            compute_quantities=constrained_quantities,
-            n_features=X.shape[1] - 1,
+        if self.fit_intercept:
+            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            beta_hat_full = self.coef_
+
+        result = constrained_lrt_1df(
+            idx=idx,
+            beta_hat_full=beta_hat_full,
+            loglik_full=self.loglik_,
+            compute_quantities_full=compute_quantities_full,
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
@@ -583,15 +585,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             xtol=self.xtol,
         )
 
-        chi_sq = max(0.0, 2.0 * (self.loglik_ - result.loglik))
-        pval = scipy.stats.chi2.sf(chi_sq, df=1)
-
-        # back-corrected SE: |β|/√χ² (ensures (β/SE)² = χ²)
-        beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
-        bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
-
-        self.lrt_pvalues_[idx] = pval
-        self.lrt_bse_[idx] = bse
+        self.lrt_pvalues_[idx] = result.pvalue
+        self.lrt_bse_[idx] = result.bse_backcorrected
 
     def _resolve_feature_indices(
         self,
