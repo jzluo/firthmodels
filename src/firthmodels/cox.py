@@ -74,8 +74,8 @@ class FirthCoxPH(BaseEstimator):
             Feature matrix.
         y : array-like or tuple
             Survival outcome encoding. Accepts either:
-            - a NumPy structured array with fields `("event", "time")` (scikit-survival
-            convention), or
+            - a NumPy structured array with one boolean field (event indicator) and
+            one float field (time), or
             - a two-tuple `(event, time)` where `event` is a bool array indicating whether
             the event occurred, and `time` is the observed time (event or censoring).
 
@@ -257,8 +257,8 @@ def _validate_survival_y(
     ----------
     y : array-like or tuple
         Survival outcome encoding. Accepts either:
-        - a NumPy structured array with fields `("event", "time")` (scikit-survival
-          convention), or
+        - a NumPy structured array with one boolean field (event indicator) and
+          one float field (time), or
         - a two-tuple `(event, time)` where `event` is a bool array indicating whether
           the event occurred, and `time` is the observed time (event or censoring).
     n_samples : int
@@ -272,14 +272,25 @@ def _validate_survival_y(
         Observed times.
     """
     if isinstance(y, np.ndarray) and y.dtype.names is not None:
-        names = set(y.dtype.names)
-        if not {"event", "time"}.issubset(names):
+        names = y.dtype.names
+        if len(names) != 2:
+            raise ValueError(f"Structured y must have 2 fields, got {len(names)}")
+
+        # Find which field is bool (event) and which is float (time)
+        event_field = time_field = None
+        for name in names:
+            dtype = y.dtype.fields[name][0]
+            if np.issubdtype(dtype, np.bool_):
+                event_field = name
+            elif np.issubdtype(dtype, np.floating):
+                time_field = name
+
+        if event_field is None or time_field is None:
             raise ValueError(
-                f"Structured y must have fields {{'event', 'time'}}, "
-                f"got {sorted(names)}"
+                "Structured y must have one bool field (event) and one float field (time)"
             )
-        event = np.asarray(y["event"])
-        time = np.asarray(y["time"])
+        event = np.asarray(y[event_field])
+        time = np.asarray(y[time_field])
     elif isinstance(y, (tuple, list)) and len(y) == 2:
         event, time = np.asarray(y[0]), np.asarray(y[1])
     else:
