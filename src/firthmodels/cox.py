@@ -146,7 +146,7 @@ class FirthCoxPH(BaseEstimator):
     def lrt(
         self,
         features: int | str | Sequence[int | str] | None = None,
-    ) -> NDArray[np.float64]:
+    ) -> Self:
         """
         Compute penalized likelihood ratio test p-values.
         Standard errors are also back-corrected using the effect size estimate and the
@@ -161,7 +161,6 @@ class FirthCoxPH(BaseEstimator):
             - str: single feature by name (requires `feature_names_in`)
             - Sequence[int]: multiple features by index
             - Sequence[str]: multiple features by name
-            - None: all features (including intercept if `fit_intercept=True`)
 
         Returns
         -------
@@ -195,7 +194,7 @@ class FirthCoxPH(BaseEstimator):
         Parameters
         ----------
         idx : int
-            Index of the coefficient to test. Use len(coef_) for the intercept.
+            Index of the coefficient to test.
         """
 
         def compute_quantities_full(beta):
