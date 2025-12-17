@@ -2,7 +2,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from numpy.typing import NDArray
-from typing import Protocol
+from typing import Protocol, Sequence
 
 
 @dataclass
@@ -24,3 +24,39 @@ class IterationQuantities(Protocol):
     loglik: float
     modified_score: NDArray[np.float64]
     fisher_info: NDArray[np.float64]
+
+
+def resolve_feature_indices(
+    features: int | str | Sequence[int | str] | None,
+    *,
+    n_params: int,
+    feature_names_in: NDArray[np.str_] | None = None,
+    intercept_idx: int | None = None,
+):
+    """Convert feature names and/or indices to list of parameter indices."""
+    if features is None:
+        return list(range(n_params))
+
+    features_seq = (
+        [features] if isinstance(features, (int, np.integer, str)) else features
+    )
+
+    indices = []
+    for feat in features_seq:
+        if isinstance(feat, str):
+            if feat == "intercept":
+                indices.append(intercept_idx)
+            elif feature_names_in is None:
+                raise ValueError(
+                    "No feature names available. Pass a DataFrame to fit(), or use "
+                    "integer indices."
+                )
+            else:
+                indices.append(list(feature_names_in).index(feat))
+        elif isinstance(feat, (int, np.integer)):
+            indices.append(int(feat))
+        else:
+            raise TypeError(
+                f"Elements of `features` must be int or str, got {type(feat)}"
+            )
+    return indices

@@ -133,6 +133,12 @@ class FirthCoxPH(BaseEstimator):
 
         self._compute_baseline_hazard(data)
 
+        # need these for LRT
+        self._fit_data = (X, y)
+
+        self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
+        self.lrt_bse_ = np.full(len(result.beta), np.nan)
+
         return self
 
     def _compute_baseline_hazard(self, data: _CoxPrecomputed) -> None:
