@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from firthmodels.cox import FirthCoxPH, _CoxPrecomputed, _validate_survival_y
+from firthmodels.cox import (
+    FirthCoxPH,
+    _CoxPrecomputed,
+    _validate_survival_y,
+    compute_cox_quantities,
+)
 
 
 def _structured_y(event: np.ndarray, time: np.ndarray) -> np.ndarray:
@@ -86,3 +91,30 @@ class TestFirthCoxPH:
 
         assert model.converged_
         np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
+
+    def test_matches_coxphf_with_monotone_likelihood(self, cox_separation_data):
+        """Matches coxphf on data with monotone likelihood."""
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+
+        model = FirthCoxPH()
+        model.fit(X, y)
+
+        expected_coef = np.array(
+            [3.8815800583, 0.6042066427, -0.4202139201, 1.0415063080]
+        )
+        expected_bse = np.array(
+            [1.4430190269, 0.1599607483, 0.2541800107, 0.3128784410]
+        )
+        expected_lr = 57.6071
+
+        assert model.converged_
+        np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-6)
+        np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-6)
+
+        # Absolute penalized log-likelihoods differ with coxphf by an
+        # additive constant. Compare likelihood ratios instead.
+        pre = _CoxPrecomputed.from_data(X, time, event)
+        null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre).loglik
+        lr_stat = 2.0 * (model.loglik_ - null_loglik)
+        np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
