@@ -81,7 +81,7 @@ class TestFirthCoxPH:
         event = np.array([True, False])
         y = _structured_y(event, time)
 
-        model = FirthCoxPH(max_iter=200, tol=1e-10)
+        model = FirthCoxPH()
         model.fit(X, y)
 
         assert model.converged_

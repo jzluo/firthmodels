@@ -55,12 +55,14 @@ class FirthCoxPH(BaseEstimator):
         max_iter: int = 25,
         max_step: float = 5.0,
         max_halfstep: int = 25,
-        tol: float = 1e-4,
+        gtol: float = 1e-4,
+        xtol: float = 1e-6,
     ) -> None:
         self.max_iter = max_iter
         self.max_step = max_step
         self.max_halfstep = max_halfstep
-        self.tol = tol
+        self.gtol = gtol
+        self.xtol = xtol
 
     def fit(self, X: ArrayLike, y: ArrayLike) -> Self:
         """
@@ -100,7 +102,8 @@ class FirthCoxPH(BaseEstimator):
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
-            tol=self.tol,
+            gtol=self.gtol,
+            xtol=self.xtol,
         )
 
         self.coef_ = result.beta
