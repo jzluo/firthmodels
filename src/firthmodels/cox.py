@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted, validate_data
-from typing import Self, cast
+from typing import Self, cast, Sequence
 
 from firthmodels._solvers import newton_raphson
+from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._utils import resolve_feature_indices
 
 
 class FirthCoxPH(BaseEstimator):
@@ -43,6 +45,12 @@ class FirthCoxPH(BaseEstimator):
         Wald standard errors.
     pvalues_ : ndarray of shape (n_features,)
         Wald p-values.
+    lrt_pvalues_ : ndarray of shape (n_features,)
+        Likelihood ratio test p-values. Computed by `lrt()`. Values are
+        NaN until computed.
+    lrt_bse_ : ndarray of shape (n_features,)
+        Back-corrected standard errors from LRT. Computed by `lrt()`.
+        Values are NaN until computed.
     unique_times_ : ndarray of shape (n_events,)
         Unique event times in ascending order.
     cum_baseline_hazard_ : ndarray of shape (n_events,)
@@ -99,16 +107,16 @@ class FirthCoxPH(BaseEstimator):
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
 
         # Precompute sorted data and block structure
-        data = _CoxPrecomputed.from_data(X, time, event)
+        precomputed = _CoxPrecomputed.from_data(X, time, event)
 
         # Create closure for newton_raphson
         def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-            return compute_cox_quantities(beta, data)
+            return compute_cox_quantities(beta, precomputed)
 
         # Run optimizer
         result = newton_raphson(
             compute_quantities=quantities,
-            n_features=data.n_features,
+            n_features=precomputed.n_features,
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
@@ -126,18 +134,103 @@ class FirthCoxPH(BaseEstimator):
             cov = np.linalg.inv(result.fisher_info)
             self.bse_ = np.sqrt(np.diag(cov))
         except np.linalg.LinAlgError:
-            self.bse_ = np.full(data.n_features, np.nan)
+            self.bse_ = np.full(precomputed.n_features, np.nan)
 
         z = result.beta / self.bse_
         self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
 
-        self._compute_baseline_hazard(data)
+        # need these for LRT
+        self._precomputed = precomputed
+
+        self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
+        self.lrt_bse_ = np.full(len(result.beta), np.nan)
+
+        self._compute_baseline_hazard(self._precomputed)
 
         return self
 
-    def _compute_baseline_hazard(self, data: _CoxPrecomputed) -> None:
+    def lrt(
+        self,
+        features: int | str | Sequence[int | str] | None = None,
+    ) -> Self:
+        """
+        Compute penalized likelihood ratio test p-values.
+        Standard errors are also back-corrected using the effect size estimate and the
+        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
+        by 1/SE².
+
+        Parameters
+        ----------
+        features : int, str, sequence of int, sequence of str, or None, default=None
+            Features to test. If None, test all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+
+        Returns
+        -------
+        self : FirthCoxPH
+        """
+        check_is_fitted(self)
+        indices = self._resolve_feature_indices(features)
+
+        # compute LRT
+        for idx in indices:
+            if np.isnan(self.lrt_pvalues_[idx]):
+                self._compute_single_lrt(idx)
+        return self
+
+    def _resolve_feature_indices(
+        self,
+        features: int | str | Sequence[int | str] | None,
+    ) -> list[int]:
+        """Convert feature names and/or indices to list of parameter indices."""
+        return resolve_feature_indices(
+            features,
+            n_params=len(self.coef_),
+            feature_names_in=getattr(self, "feature_names_in_", None),
+        )
+
+    def _compute_single_lrt(self, idx: int) -> None:
+        """
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
+        back-corrected standard error.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the coefficient to test.
+        """
+
+        def compute_quantities_full(beta):
+            return compute_cox_quantities(
+                precomputed=self._precomputed,
+                beta=beta,
+                # sample_weight=sample_weight,
+                # offset=offset,
+            )
+
+        beta_hat_full = self.coef_
+
+        result = constrained_lrt_1df(
+            idx=idx,
+            beta_hat_full=beta_hat_full,
+            loglik_full=self.loglik_,
+            compute_quantities_full=compute_quantities_full,
+            max_iter=self.max_iter,
+            max_step=self.max_step,
+            max_halfstep=self.max_halfstep,
+            gtol=self.gtol,
+            xtol=self.xtol,
+        )
+
+        self.lrt_pvalues_[idx] = result.pvalue
+        self.lrt_bse_[idx] = result.bse_backcorrected
+
+    def _compute_baseline_hazard(self, precomputed: _CoxPrecomputed) -> None:
         """Compute Breslow baseline cumulative hazard from fitted model."""
-        eta = data.X @ self.coef_
+        eta = precomputed.X @ self.coef_
         c = np.max(eta)
         risk_scaled = np.exp(eta - c)
 
@@ -146,13 +239,13 @@ class FirthCoxPH(BaseEstimator):
 
         S0_scaled = 0.0
         start = 0
-        for b in range(data.n_blocks):
-            end = data.block_ends[b]
+        for b in range(precomputed.n_blocks):
+            end = precomputed.block_ends[b]
             S0_scaled += risk_scaled[start:end].sum()
 
-            d = data.block_d[b]
+            d = precomputed.block_d[b]
             if d > 0:
-                t = data.time[end - 1]
+                t = precomputed.time[end - 1]
                 # log(d / S0_true) = log(d) - log(S0_scaled) - c
                 log_h = np.log(d) - np.log(S0_scaled) - c
                 event_times.append(t)
@@ -412,7 +505,7 @@ def _validate_survival_y(
 
 def compute_cox_quantities(
     beta: NDArray[np.float64],
-    data: _CoxPrecomputed,
+    precomputed: _CoxPrecomputed,
 ) -> CoxQuantities:
     """
     Compute all quantities needed for one Newton-Raphson iteration.
@@ -421,7 +514,7 @@ def compute_cox_quantities(
     ----------
     beta : ndarray, shape (n_features,)
         Current coefficient estimates.
-    data : _CoxPrecomputed
+    precomputed : _CoxPrecomputed
         Precomputed data from _CoxPrecomputed.from_data().
 
     Returns
@@ -429,12 +522,12 @@ def compute_cox_quantities(
     CoxQuantities
         Penalized log-likelihood, modified score, and Fisher information.
     """
-    X = data.X
-    block_ends = data.block_ends
-    block_d = data.block_d
-    block_s = data.block_s
-    n_blocks = data.n_blocks
-    k = data.n_features
+    X = precomputed.X
+    block_ends = precomputed.block_ends
+    block_d = precomputed.block_d
+    block_s = precomputed.block_s
+    n_blocks = precomputed.n_blocks
+    k = precomputed.n_features
 
     # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
     # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.

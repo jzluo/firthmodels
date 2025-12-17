@@ -18,6 +18,8 @@ from sklearn.utils.validation import (
 from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
+from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._utils import resolve_feature_indices
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -534,18 +536,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 self._compute_single_lrt(idx)
         return self
 
-    def _feature_name_to_index(self, name: str) -> int:
-        """Map feature name to its index"""
-        if not hasattr(self, "feature_names_in_"):
-            raise ValueError(
-                "No feature names available. Pass a DataFrame to fit(), "
-                "or use integer indices."
-            )
-        try:
-            return list(self.feature_names_in_).index(name)
-        except ValueError:
-            raise KeyError(f"Unknown feature: '{name}'") from None
-
     def _compute_single_lrt(self, idx: int) -> None:
         """
         Fit constrained model with `beta[idx]=0` and compute LRT p-value and
@@ -558,24 +548,25 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         """
         X, y, sample_weight, offset = self._fit_data
 
-        # fit all indices except for the feature being tested
-        free_indices = [i for i in range(X.shape[1]) if i != idx]
-
-        # Wrapper so the solver only optimizes the k-1 "free" parameters.
-        # Reconstructs full k-vector, computes quantities with full Fisher,
-        # then slices score and Fisher to k-1 dimensions before returning to the solver.
-        def constrained_quantities(beta_free):
-            beta_full = np.insert(beta_free, idx, 0.0)
-            q = compute_logistic_quantities(X, y, beta_full, sample_weight, offset)
-            return LogisticQuantities(
-                loglik=q.loglik,
-                modified_score=q.modified_score[free_indices],
-                fisher_info=q.fisher_info[np.ix_(free_indices, free_indices)],
+        def compute_quantities_full(beta):
+            return compute_logistic_quantities(
+                X=X,
+                y=y,
+                beta=beta,
+                sample_weight=sample_weight,
+                offset=offset,
             )
 
-        result = newton_raphson(
-            compute_quantities=constrained_quantities,
-            n_features=X.shape[1] - 1,
+        if self.fit_intercept:
+            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            beta_hat_full = self.coef_
+
+        result = constrained_lrt_1df(
+            idx=idx,
+            beta_hat_full=beta_hat_full,
+            loglik_full=self.loglik_,
+            compute_quantities_full=compute_quantities_full,
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
@@ -583,48 +574,23 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             xtol=self.xtol,
         )
 
-        chi_sq = max(0.0, 2.0 * (self.loglik_ - result.loglik))
-        pval = scipy.stats.chi2.sf(chi_sq, df=1)
-
-        # back-corrected SE: |β|/√χ² (ensures (β/SE)² = χ²)
-        beta_val = self.intercept_ if idx == len(self.coef_) else self.coef_[idx]
-        bse = np.abs(beta_val) / np.sqrt(chi_sq) if chi_sq > 0 else np.inf
-
-        self.lrt_pvalues_[idx] = pval
-        self.lrt_bse_[idx] = bse
+        self.lrt_pvalues_[idx] = result.pvalue
+        self.lrt_bse_[idx] = result.bse_backcorrected
 
     def _resolve_feature_indices(
         self,
         features: int | str | Sequence[int | str] | None,
     ) -> list[int]:
         """Convert feature names and/or indices to list of parameter indices."""
-        n_coef = len(self.coef_)
-        n_params = n_coef + 1 if self.fit_intercept else n_coef
+        n_coefs = len(self.coef_)
+        n_params = n_coefs + 1 if self.fit_intercept else n_coefs
 
-        if features is None:
-            return list(range(n_params))
-
-        features_seq = (
-            [features] if isinstance(features, (int, np.integer, str)) else features
+        return resolve_feature_indices(
+            features,
+            n_params=n_params,
+            feature_names_in=getattr(self, "feature_names_in_", None),
+            intercept_idx=n_coefs if self.fit_intercept else None,
         )
-        indices = []
-        for feat in features_seq:
-            if isinstance(feat, str):
-                if feat == "intercept":
-                    indices.append(n_coef)
-                else:
-                    indices.append(self._feature_name_to_index(feat))
-            elif isinstance(feat, (int, np.integer)):
-                indices.append(int(feat))
-            else:
-                raise TypeError(
-                    f"Elements of `features` must be int or str, got {type(feat)}"
-                )
-
-        if n_coef in indices and not self.fit_intercept:
-            raise ValueError("Cannot specify intercept when fit_intercept=False")
-
-        return indices
 
     def decision_function(
         self,
