@@ -19,6 +19,7 @@ from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
 from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._utils import resolve_feature_indices
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -535,18 +536,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 self._compute_single_lrt(idx)
         return self
 
-    def _feature_name_to_index(self, name: str) -> int:
-        """Map feature name to its index"""
-        if not hasattr(self, "feature_names_in_"):
-            raise ValueError(
-                "No feature names available. Pass a DataFrame to fit(), "
-                "or use integer indices."
-            )
-        try:
-            return list(self.feature_names_in_).index(name)
-        except ValueError:
-            raise KeyError(f"Unknown feature: '{name}'") from None
-
     def _compute_single_lrt(self, idx: int) -> None:
         """
         Fit constrained model with `beta[idx]=0` and compute LRT p-value and
@@ -593,33 +582,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         features: int | str | Sequence[int | str] | None,
     ) -> list[int]:
         """Convert feature names and/or indices to list of parameter indices."""
-        n_coef = len(self.coef_)
-        n_params = n_coef + 1 if self.fit_intercept else n_coef
+        n_params = len(self.coef_) + 1 if self.fit_intercept else len(self.coef_)
 
-        if features is None:
-            return list(range(n_params))
-
-        features_seq = (
-            [features] if isinstance(features, (int, np.integer, str)) else features
+        return resolve_feature_indices(
+            features,
+            n_params=n_params,
+            feature_names_in=getattr(self, "feature_names_in_", None),
+            intercept_idx=n_params if self.fit_intercept else None,
         )
-        indices = []
-        for feat in features_seq:
-            if isinstance(feat, str):
-                if feat == "intercept":
-                    indices.append(n_coef)
-                else:
-                    indices.append(self._feature_name_to_index(feat))
-            elif isinstance(feat, (int, np.integer)):
-                indices.append(int(feat))
-            else:
-                raise TypeError(
-                    f"Elements of `features` must be int or str, got {type(feat)}"
-                )
-
-        if n_coef in indices and not self.fit_intercept:
-            raise ValueError("Cannot specify intercept when fit_intercept=False")
-
-        return indices
 
     def decision_function(
         self,
