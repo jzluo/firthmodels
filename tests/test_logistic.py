@@ -123,3 +123,52 @@ class TestFirthLogisticRegression:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             model.fit(X, y)
+
+    def test_lrt_with_string_feature_names(self, separation_data_df):
+        X, y = separation_data_df
+        model = FirthLogisticRegression().fit(X, y)
+
+        # Test single string
+        model.lrt("x1")
+        assert not np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_pvalues_[1])
+
+        # Test list of strings
+        model.lrt(["x2", "x4"])
+        assert not np.isnan(model.lrt_pvalues_[1])
+        assert np.isnan(model.lrt_pvalues_[2])
+        assert not np.isnan(model.lrt_pvalues_[3])
+
+        # Test mixed
+        model.lrt([0, "x3"])
+        assert not np.isnan(model.lrt_pvalues_[0])
+        assert not np.isnan(model.lrt_pvalues_[2])
+
+    def test_lrt_intercept_by_name(self, separation_data_df):
+        X, y = separation_data_df
+        model = FirthLogisticRegression().fit(X, y)
+
+        model.lrt("intercept")
+        assert np.all(np.isnan(model.lrt_pvalues_[:-1]))
+        assert not np.isnan(model.lrt_pvalues_[-1])
+
+    def test_lrt_intercept_raises_when_no_intercept(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression(fit_intercept=False).fit(X, y)
+
+        with pytest.raises(ValueError, match="Model has no intercept"):
+            model.lrt("intercept")
+
+    def test_lrt_string_raises_without_feature_names(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression().fit(X, y)
+
+        with pytest.raises(ValueError, match="No feature names available"):
+            model.lrt("x1")
+
+    def test_lrt_unknown_feature_raises(self, separation_data_df):
+        X, y = separation_data_df
+        model = FirthLogisticRegression().fit(X, y)
+
+        with pytest.raises(KeyError, match="Unknown feature"):
+            model.lrt("nonexistent")

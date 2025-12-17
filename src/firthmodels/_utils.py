@@ -45,6 +45,8 @@ def resolve_feature_indices(
     for feat in features_seq:
         if isinstance(feat, str):
             if feat == "intercept":
+                if intercept_idx is None:
+                    raise ValueError("Model has no intercept")
                 indices.append(intercept_idx)
             elif feature_names_in is None:
                 raise ValueError(
@@ -52,7 +54,10 @@ def resolve_feature_indices(
                     "integer indices."
                 )
             else:
-                indices.append(list(feature_names_in).index(feat))
+                try:
+                    indices.append(list(feature_names_in).index(feat))
+                except ValueError:
+                    raise KeyError(f"Unknown feature: '{feat}'") from None
         elif isinstance(feat, (int, np.integer)):
             indices.append(int(feat))
         else:

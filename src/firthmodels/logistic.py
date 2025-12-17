@@ -582,13 +582,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         features: int | str | Sequence[int | str] | None,
     ) -> list[int]:
         """Convert feature names and/or indices to list of parameter indices."""
-        n_params = len(self.coef_) + 1 if self.fit_intercept else len(self.coef_)
+        n_coefs = len(self.coef_)
+        n_params = n_coefs + 1 if self.fit_intercept else n_coefs
 
         return resolve_feature_indices(
             features,
             n_params=n_params,
             feature_names_in=getattr(self, "feature_names_in_", None),
-            intercept_idx=n_params if self.fit_intercept else None,
+            intercept_idx=n_coefs if self.fit_intercept else None,
         )
 
     def decision_function(

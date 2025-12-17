@@ -29,6 +29,16 @@ def separation_data():
     return make_separation_data()
 
 
+@pytest.fixture
+def separation_data_df():
+    """Separation data as DataFrame with named columns."""
+    import pandas as pd
+
+    X, y = make_separation_data()
+    df = pd.DataFrame(X, columns=["x1", "x2", "x3", "x4"])
+    return df, y
+
+
 def make_cox_separation_data(seed=42, n=100):
     """Generate survival data with monotone likelihood for testing."""
     rng = np.random.default_rng(seed)
