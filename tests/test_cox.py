@@ -149,6 +149,7 @@ class TestFirthCoxPH:
         # )
 
         # LRT p-values
+        model.lrt()
         expected_lrt_pvalues = np.array(
             [
                 7.318984974e-09,  # separator
