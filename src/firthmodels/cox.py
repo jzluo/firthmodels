@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import warnings
+from dataclasses import dataclass
+from typing import Literal, Self, Sequence, cast
+
 import numpy as np
 import scipy
-
-from dataclasses import dataclass
 from numpy.typing import ArrayLike, NDArray
 from sklearn.base import BaseEstimator
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
-from typing import Self, cast, Sequence
 
-from firthmodels._solvers import newton_raphson
 from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._profile_ci import profile_ci_bound
+from firthmodels._solvers import newton_raphson
 from firthmodels._utils import resolve_feature_indices
 
 
@@ -20,11 +23,11 @@ class FirthCoxPH(BaseEstimator):
 
     Parameters
     ----------
-    max_iter : int, default=25
+    max_iter : int, default=50
         Maximum number of Newton-Raphson iterations.
     max_step : float, default=5.0
         Maximum step size per coefficient.
-    max_halfstep : int, default=25
+    max_halfstep : int, default=5
         Maximum number of step-halvings per iteration.
     gtol : float, default=1e-4
         Gradient convergence criteria. Converged when max|gradient| < gtol.
@@ -70,9 +73,9 @@ class FirthCoxPH(BaseEstimator):
 
     def __init__(
         self,
-        max_iter: int = 25,
+        max_iter: int = 50,
         max_step: float = 5.0,
-        max_halfstep: int = 25,
+        max_halfstep: int = 5,
         gtol: float = 1e-4,
         xtol: float = 1e-6,
     ) -> None:
@@ -146,6 +149,13 @@ class FirthCoxPH(BaseEstimator):
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
 
         self._compute_baseline_hazard(self._precomputed)
+
+        # _profile_ci_cache and _profile_ci_computed are keyed by (alpha, tol, max_iter)
+        self._profile_ci_cache: dict[tuple[float, float, int], NDArray[np.float64]] = {}
+        # tracks completed bound computations; False means never tried or interrupted
+        self._profile_ci_computed: dict[
+            tuple[float, float, int], NDArray[np.bool_]
+        ] = {}
 
         return self
 
@@ -258,6 +268,121 @@ class FirthCoxPH(BaseEstimator):
         hazard_increments = np.exp(log_hazard_increments[::-1])
         self.cum_baseline_hazard_ = np.cumsum(hazard_increments)
         self.baseline_survival_ = np.exp(-self.cum_baseline_hazard_)
+
+    def conf_int(
+        self,
+        alpha: float = 0.05,
+        method: Literal["wald", "pl"] = "wald",
+        features: int | str | Sequence[int | str] | None = None,
+        max_iter: int = 50,
+        tol: float = 1e-4,
+    ) -> NDArray[np.float64]:
+        """
+        Compute confidence intervals for the coefficients. If `method='pl'`, profile
+        likelihood confidence intervals are computed using the Venzon-Moolgavkar method.
+
+        Parameters
+        ----------
+        alpha : float, default=0.05
+            Significance level (default 0.05 for 95% CI)
+        method : {'wald', 'pl'}, default='wald'
+            Method to compute confidence intervals.
+            - 'wald': Wald confidence intervals (fast)
+            - 'pl': Profile likelihood confidence intervals (more accurate, slower)
+        features: int, str, sequence of int, sequence of str, or None, default=None
+            Features to compute CIs for (only used for `method='pl'`).
+            If None, compute for all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+        max_iter : int, default=50
+            Maximum number of iterations per bound (only used for `method='pl'`)
+        tol : float, default=1e-4
+            Convergence tolerance (only used for `method='pl'`)
+
+        Returns
+        -------
+        ndarray, shape(n_features, 2)
+            Column 0: lower bounds, Column 1: upper bounds
+
+        Notes
+        -----
+        Profile-likelihood CIs are superior to Wald CIs when the likelihood is
+        asymmetric, which can occur with small samples or separated data.
+        For `method='pl'`, results are cached. Subsequent calls with the same `alpha`,
+        `tol`, and `max_iter` return cached values without recomputation.
+
+        References
+        ----------
+        Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing
+        Profile-Likelihood-Based Confidence Intervals." Applied Statistics,
+        37(1), 87-94
+        """
+        check_is_fitted(self)
+        n_params = len(self.bse_)
+
+        if method == "wald":
+            z = scipy.stats.norm.ppf(1 - alpha / 2)
+            beta = self.coef_
+            lower = beta - z * self.bse_
+            upper = beta + z * self.bse_
+            return np.column_stack([lower, upper])
+
+        elif method == "pl":
+            # get or create cache for this (alpha, tol, max_iter) combination
+            cache_key = (alpha, tol, max_iter)
+            if cache_key not in self._profile_ci_cache:
+                self._profile_ci_cache[cache_key] = np.full((n_params, 2), np.nan)
+                self._profile_ci_computed[cache_key] = np.zeros(
+                    (n_params, 2), dtype=bool
+                )
+            ci = self._profile_ci_cache[cache_key]
+            computed = self._profile_ci_computed[cache_key]
+
+            indices = self._resolve_feature_indices(features)
+
+            # compute profile CIs for bounds not already attempted
+            chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
+            l_star = self.loglik_ - chi2_crit / 2
+
+            def compute_quantities_full(beta: NDArray[np.float64]):
+                return compute_cox_quantities(beta=beta, precomputed=self._precomputed)
+
+            theta_hat = self.coef_.copy()
+
+            D0 = -compute_quantities_full(theta_hat).fisher_info  # hessian at MLE
+            for idx in indices:
+                for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                    if not computed[idx, bound_idx]:
+                        which = cast(Literal[-1, 1], which)  # mypy -_-
+                        result = profile_ci_bound(
+                            idx=idx,
+                            theta_hat=theta_hat,
+                            l_star=l_star,
+                            which=which,
+                            max_iter=max_iter,
+                            tol=tol,
+                            chi2_crit=chi2_crit,
+                            compute_quantities_full=compute_quantities_full,
+                            D0=D0,
+                        )
+
+                        if result.converged:
+                            ci[idx, bound_idx] = result.bound
+                        else:
+                            warnings.warn(
+                                f"Profile-likelihood CI did not converge for parameter {idx} "
+                                f"({'lower' if which == -1 else 'upper'} bound) after {result.n_iter} iterations.",
+                                ConvergenceWarning,
+                                stacklevel=2,
+                            )
+                        # mark AFTER completion (interrupt safety for jupyter people)
+                        computed[idx, bound_idx] = True
+            return ci
+
+        else:
+            raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
 
     def predict(self, X: ArrayLike) -> NDArray[np.float64]:
         check_is_fitted(self)
