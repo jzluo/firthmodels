@@ -70,5 +70,8 @@ exclude=[
     "dist"
 ]
 
+[tool.ruff.lint]
+select = ["I"]
+
 [tool.mypy]
 ignore_missing_imports = true
