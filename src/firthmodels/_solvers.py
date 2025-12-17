@@ -36,7 +36,7 @@ def newton_raphson(
     gtol : float
         Gradient convergence criteria. Converged when max|gradient| < gtol.
     xtol : float
-        Coefficient convergence criteria. Converged when max|delta| < xtol.
+        Parameter convergence criteria. Converged when max|delta| < xtol.
 
     Returns
     -------

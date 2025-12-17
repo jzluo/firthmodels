@@ -44,7 +44,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
     gtol : float, default=1e-4
         Gradient convergence criteria. Converged when max|gradient| < gtol.
     xtol : float, default=1e-4
-        Coefficient convergence criteria. Converged when max|delta| < xtol.
+        Parameter convergence criteria. Converged when max|delta| < xtol.
     fit_intercept : bool, default=True
         Whether to fit intercept
 

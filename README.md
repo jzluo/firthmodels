@@ -111,7 +111,8 @@ model.fit(X, y, offset=offset)
 |-----------|---------|-------------|
 | `fit_intercept` | `True` | Whether to fit an intercept term |
 | `max_iter` | `25` | Maximum Newton-Raphson iterations |
-| `tol` | `1e-4` | Convergence tolerance |
+| `gtol` | `1e-4` | Gradient convergence tolerance (converged when max\|gradient\| < gtol) |
+| `xtol` | `1e-4` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
 | `max_step` | `5.0` | Maximum step size per coefficient |
 | `max_halfstep` | `25` | Maximum step-halvings per iteration |
 
