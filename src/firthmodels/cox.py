@@ -45,6 +45,12 @@ class FirthCoxPH(BaseEstimator):
         Wald standard errors.
     pvalues_ : ndarray of shape (n_features,)
         Wald p-values.
+    lrt_pvalues_ : ndarray of shape (n_features,)
+        Likelihood ratio test p-values. Computed by `lrt()`. Values are
+        NaN until computed.
+    lrt_bse_ : ndarray of shape (n_features,)
+        Back-corrected standard errors from LRT. Computed by `lrt()`.
+        Values are NaN until computed.
     unique_times_ : ndarray of shape (n_events,)
         Unique event times in ascending order.
     cum_baseline_hazard_ : ndarray of shape (n_events,)

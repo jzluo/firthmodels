@@ -32,13 +32,19 @@ def resolve_feature_indices(
     n_params: int,
     feature_names_in: NDArray[np.str_] | None = None,
     intercept_idx: int | None = None,
-):
+) -> list[int]:
     """Convert feature names and/or indices to list of parameter indices."""
     if features is None:
         return list(range(n_params))
 
     features_seq = (
         [features] if isinstance(features, (int, np.integer, str)) else features
+    )
+
+    feature_names_map = (
+        {name: i for i, name in enumerate(feature_names_in)}
+        if feature_names_in is not None
+        else None
     )
 
     indices = []
@@ -48,15 +54,15 @@ def resolve_feature_indices(
                 if intercept_idx is None:
                     raise ValueError("Model has no intercept")
                 indices.append(intercept_idx)
-            elif feature_names_in is None:
+            elif feature_names_map is None:
                 raise ValueError(
                     "No feature names available. Pass a DataFrame to fit(), or use "
                     "integer indices."
                 )
             else:
                 try:
-                    indices.append(list(feature_names_in).index(feat))
-                except ValueError:
+                    indices.append(feature_names_map[feat])
+                except KeyError:
                     raise KeyError(f"Unknown feature: '{feat}'") from None
         elif isinstance(feat, (int, np.integer)):
             indices.append(int(feat))
