@@ -41,8 +41,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Maximum step size per coefficient (Newton-Raphson only)
     max_halfstep : int, default=25
         Maximum number of step-halvings per iteration (Newton-Raphson only)
-    tol : float, default=1e-4
-        Tolerance for stopping criteria
+    gtol : float, default=1e-4
+        Gradient convergence criteria. Converged when max|gradient| < gtol.
+    xtol : float, default=1e-4
+        Coefficient convergence criteria. Converged when max|delta| < xtol.
     fit_intercept : bool, default=True
         Whether to fit intercept
 
@@ -107,14 +109,16 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         max_iter: int = 25,
         max_step: float = 5.0,
         max_halfstep: int = 25,
-        tol: float = 1e-4,
+        gtol: float = 1e-4,
+        xtol: float = 1e-4,
         fit_intercept: bool = True,
     ) -> None:
         self.solver = solver
         self.max_iter = max_iter
         self.max_step = max_step
         self.max_halfstep = max_halfstep
-        self.tol = tol
+        self.gtol = gtol
+        self.xtol = xtol
         self.fit_intercept = fit_intercept
 
     def __sklearn_tags__(self) -> Tags:
@@ -193,7 +197,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
-            tol=self.tol,
+            gtol=self.gtol,
+            xtol=self.xtol,
         )
 
         # === Extract coefficients ===
@@ -426,6 +431,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             F[idx] = q.loglik - l_star
 
             # Appendix step 9: check convergence
+            # TODO: the paper checks for relative change in loglik and the coefficients
+            # between iterations. We're checking |loglik-l_star| directly, and the
+            # |scores| of the nuisance parameters.
             if np.max(np.abs(F)) <= tol:
                 return theta[idx], True, iteration
 
@@ -571,7 +579,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             max_iter=self.max_iter,
             max_step=self.max_step,
             max_halfstep=self.max_halfstep,
-            tol=self.tol,
+            gtol=self.gtol,
+            xtol=self.xtol,
         )
 
         chi_sq = max(0.0, 2.0 * (self.loglik_ - result.loglik))
@@ -666,8 +675,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             raise ValueError(
                 f"max_halfstep must be non-negative, got {self.max_halfstep}"
             )
-        if self.tol < 0:
-            raise ValueError(f"tol must be non-negative, got {self.tol}")
+        if self.gtol < 0 or self.xtol < 0:
+            raise ValueError("gtol and xtol must be non-negative.")
         X, y = validate_data(
             self, X, y, dtype=np.float64, y_numeric=False, ensure_min_samples=2
         )
