@@ -92,6 +92,23 @@ class TestFirthCoxPH:
         assert model.converged_
         np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
 
+    def test_breslow_baseline_hazard_two_individual(self):
+        # Test Breslow estimator for two-individual example.
+        # With beta = log(3):
+        #   At time=1: risk set = {1,2}, S0 = exp(log(3)) + exp(0) = 4, H = 1/4
+        X = np.array([[1.0], [0.0]])
+        time = np.array([1.0, 2.0])
+        event = np.array([True, False])
+        y = _structured_y(event, time)
+
+        model = FirthCoxPH().fit(X, y)
+
+        np.testing.assert_array_equal(model.unique_times_, [1.0])
+        np.testing.assert_allclose(model.cum_baseline_hazard_, [0.25], rtol=1e-6)
+        np.testing.assert_allclose(
+            model.baseline_survival_, np.exp(-model.cum_baseline_hazard_)
+        )
+
     def test_matches_coxphf_with_monotone_likelihood(self, cox_separation_data):
         """Matches coxphf on data with monotone likelihood."""
         X, time, event = cox_separation_data

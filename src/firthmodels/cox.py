@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import scipy
 
@@ -39,6 +41,12 @@ class FirthCoxPH(BaseEstimator):
         Wald standard errors.
     pvalues_ : ndarray of shape (n_features,)
         Wald p-values.
+    unique_times_ : ndarray of shape (n_events,)
+        Unique event times in ascending order.
+    cum_baseline_hazard_ : ndarray of shape (n_events,)
+        Breslow cumulative baseline hazard at each unique event time.
+    baseline_survival_ : ndarray of shape (n_events,)
+        Baseline survival function at each unique event time.
     n_features_in_ : int
         Number of features seen during fit.
     feature_names_in_ : ndarray of shape (n_features_in_,)
@@ -121,7 +129,40 @@ class FirthCoxPH(BaseEstimator):
         z = result.beta / self.bse_
         self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
 
+        self._compute_baseline_hazard(data)
+
         return self
+
+    def _compute_baseline_hazard(self, data: _CoxPrecomputed) -> None:
+        """Compute Breslow baseline cumulative hazard from fitted model."""
+        eta = data.X @ self.coef_
+        c = np.max(eta)
+        risk_scaled = np.exp(eta - c)
+
+        event_times = []
+        log_hazard_increments = []
+
+        S0_scaled = 0.0
+        start = 0
+        for b in range(data.n_blocks):
+            end = data.block_ends[b]
+            S0_scaled += risk_scaled[start:end].sum()
+
+            d = data.block_d[b]
+            if d > 0:
+                t = data.time[end - 1]
+                # log(d / S0_true) = log(d) - log(S0_scaled) - c
+                log_h = np.log(d) - np.log(S0_scaled) - c
+                event_times.append(t)
+                log_hazard_increments.append(log_h)
+
+            start = end
+
+        # Reverse to ascending time order
+        self.unique_times_ = np.array(event_times[::-1])
+        hazard_increments = np.exp(log_hazard_increments[::-1])
+        self.cum_baseline_hazard_ = np.cumsum(hazard_increments)
+        self.baseline_survival_ = np.exp(-self.cum_baseline_hazard_)
 
     def predict(self, X: ArrayLike) -> NDArray[np.float64]:
         check_is_fitted(self)
