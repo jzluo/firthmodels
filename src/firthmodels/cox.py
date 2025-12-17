@@ -24,8 +24,10 @@ class FirthCoxPH(BaseEstimator):
         Maximum step size per coefficient.
     max_halfstep : int, default=25
         Maximum number of step-halvings per iteration.
-    tol : float, default=1e-4
-        Tolerance for stopping criteria
+    gtol : float, default=1e-4
+        Gradient convergence criteria. Converged when max|gradient| < gtol.
+    xtol : float, default=1e-6
+        Parameter convergence criteria. Converged when max|delta| < xtol.
 
     Attributes
     ----------
