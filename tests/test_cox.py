@@ -3,8 +3,8 @@ import pytest
 
 from firthmodels.cox import (
     FirthCoxPH,
-    _CoxPrecomputed,
     _concordance_index,
+    _CoxPrecomputed,
     _validate_survival_y,
     compute_cox_quantities,
 )
@@ -137,17 +137,6 @@ class TestFirthCoxPH:
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
         np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
 
-        # # Wald p-values
-        # expected_pvalues = np.array([
-        #     0.0071472980682,  # separator
-        #     0.0001585898134,  # x1
-        #     0.0982873445066,  # x2
-        #     0.0008722446453,  # x3
-        # ])
-        # np.testing.assert_allclose(
-        #     model.wald_pvalues_, expected_pvalues, rtol=1e-6
-        # )
-
         # LRT p-values
         model.lrt()
         expected_lrt_pvalues = np.array(
@@ -159,6 +148,19 @@ class TestFirthCoxPH:
             ]
         )
         np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-6)
+
+        ci = model.conf_int(method="pl")
+        # Profile likelihood CIs from coxphf (in log scale)
+        expected_ci = np.array(
+            [
+                [1.9343469272, 8.7215676015],  # separator
+                [0.2921186188, 0.9164270978],  # x1
+                [-0.9217200647, 0.0699415336],  # x2
+                [0.4348431279, 1.6550461482],  # x3
+            ]
+        )
+
+        np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
 
 
 class TestConcordanceIndex:

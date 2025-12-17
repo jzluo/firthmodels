@@ -1,8 +1,8 @@
-import numpy as np
-
 from dataclasses import dataclass
-from numpy.typing import NDArray
 from typing import Protocol, Sequence
+
+import numpy as np
+from numpy.typing import NDArray
 
 
 @dataclass
