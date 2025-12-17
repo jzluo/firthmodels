@@ -26,12 +26,39 @@ def profile_ci_bound(
     tol: float,
     chi2_crit: float,
     compute_quantities_full: Callable[[NDArray[np.float64]], IterationQuantities],
+    D0: NDArray[np.float64] | None = None,
 ) -> ProfileCIBoundResult:
     """
     Compute one profile CI bound using Venzon-Moolgavkar (1988) algorithm.
 
     Solves F(theta) = [l(theta) - l*, dl/dw]' = 0 where beta = theta[idx]
     is the parameter of interest and w (omega) are nuisance parameters.
+
+    Parameters
+    ----------
+    idx : int
+        Index of the parameter of interest.
+    theta_hat : ndarray of shape (k,)
+        MLE coefficient vector.
+    l_star : float
+        Target log-likelihood (l_hat - chi2_crit / 2).
+    which : {-1, 1}
+        -1 for lower bound, +1 for upper bound.
+    max_iter : int
+        Maximum iterations.
+    tol : float
+        Convergence tolerance.
+    chi2_crit : float
+        Chi-squared critical value (e.g., chi2.ppf(0.95, 1) for 95% CI).
+    compute_quantities_full : callable
+        Function that takes beta vector and returns IterationQuantities.
+    D0 : ndarray of shape (k, k), optional
+        Hessian at MLE (-fisher_info at theta_hat). If None, computed internally.
+
+    Returns
+    -------
+    ProfileCIBoundResult
+        Contains bound value, convergence status, and iteration count.
 
     References
     ----------
@@ -45,9 +72,8 @@ def profile_ci_bound(
     theta = theta_hat.copy()
 
     # Appendix step 1: compute and store D0 = d2l/dtheta2 at MLE
-    q = compute_quantities_full(theta_hat)
-    # negative Fisher info == Hessian of log-likelihood
-    D0 = -q.fisher_info
+    if D0 is None:
+        D0 = -compute_quantities_full(theta_hat).fisher_info
 
     # beta = parameter of interest, omega = nuisance parameters
     other_idx = [i for i in range(k) if i != idx]
