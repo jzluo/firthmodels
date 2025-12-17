@@ -4,6 +4,7 @@ import pytest
 from firthmodels.cox import (
     FirthCoxPH,
     _CoxPrecomputed,
+    _concordance_index,
     _validate_survival_y,
     compute_cox_quantities,
 )
@@ -135,3 +136,19 @@ class TestFirthCoxPH:
         null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre).loglik
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
         np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
+
+
+class TestConcordanceIndex:
+    def test_counts_concordant_discordant_pairs(self):
+        # 2 concordant, 1 discordant -> C = 2/3
+        event = np.array([True, True, True])
+        time = np.array([1.0, 2.0, 3.0])
+        risk = np.array([2.0, 3.0, 1.0])
+        np.testing.assert_allclose(_concordance_index(event, time, risk), 2 / 3)
+
+    def test_event_and_censor_at_same_time_are_comparable(self):
+        # Event at t=1, censor at t=1: the event is observed, so comparable
+        event = np.array([True, False])
+        time = np.array([1.0, 1.0])
+        risk = np.array([2.0, 1.0])
+        assert _concordance_index(event, time, risk) == 1.0
