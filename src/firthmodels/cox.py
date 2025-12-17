@@ -179,6 +179,40 @@ class FirthCoxPH(BaseEstimator):
         risk = self.predict(X)
         return _concordance_index(event, time, risk)
 
+    def predict_cumulative_hazard_function(
+        self, X: ArrayLike, return_array: bool = True
+    ) -> NDArray[np.float64]:
+        """
+        Predict cumulative hazard function for each sample.
+        Returns array of shape (n_samples, n_event_times) evaluated at `unique_times_`.
+        """
+        if not return_array:
+            raise NotImplementedError(
+                "sksurv StepFunction output not supported; use return_array=True"
+            )
+        check_is_fitted(self)
+        X = validate_data(self, X, dtype=np.float64, reset=False)
+        X = cast(NDArray[np.float64], X)
+        risk = np.exp(X @ self.coef_)
+        return self.cum_baseline_hazard_ * risk[:, None]
+
+    def predict_survival_function(
+        self, X: ArrayLike, return_array: bool = True
+    ) -> NDArray[np.float64]:
+        """
+        Predict survival function for each sample.
+        Returns array of shape (n_samples, n_event_times) evaluated at `unique_times_`.
+        """
+        if not return_array:
+            raise NotImplementedError(
+                "sksurv StepFunction output not supported; use return_array=True"
+            )
+        check_is_fitted(self)
+        X = validate_data(self, X, dtype=np.float64, reset=False)
+        X = cast(NDArray[np.float64], X)
+        risk = np.exp(X @ self.coef_)
+        return self.baseline_survival_ ** risk[:, None]
+
 
 @dataclass
 class CoxQuantities:
