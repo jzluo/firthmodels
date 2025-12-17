@@ -19,6 +19,7 @@ from typing import Literal, Self, Sequence, cast
 
 from firthmodels._solvers import newton_raphson
 from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._utils import resolve_feature_indices
 
 
@@ -324,25 +325,39 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
             l_star = self.loglik_ - chi2_crit / 2
 
+            X, y, sample_weight, offset = self._fit_data
+
+            def compute_quantities_full(beta: NDArray[np.float64]):
+                return compute_logistic_quantities(
+                    X=X, y=y, beta=beta, sample_weight=sample_weight, offset=offset
+                )
+
+            theta_hat = (
+                np.concatenate([self.coef_, [self.intercept_]])
+                if self.fit_intercept
+                else self.coef_
+            )
             for idx in indices:
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
-                        bound, converged, n_iter = self._compute_profile_ci_bound(
+                        result = profile_ci_bound(
                             idx=idx,
+                            theta_hat=theta_hat,
                             l_star=l_star,
                             which=which,
                             max_iter=max_iter,
                             tol=tol,
                             chi2_crit=chi2_crit,
+                            compute_quantities_full=compute_quantities_full,
                         )
 
-                        if converged:
-                            ci[idx, bound_idx] = bound
+                        if result.converged:
+                            ci[idx, bound_idx] = result.bound
                         else:
                             warnings.warn(
                                 f"Profile-likelihood CI did not converge for parameter {idx} "
-                                f"({'lower' if which == -1 else 'upper'} bound) after {n_iter} iterations.",
+                                f"({'lower' if which == -1 else 'upper'} bound) after {result.n_iter} iterations.",
                                 ConvergenceWarning,
                                 stacklevel=2,
                             )
