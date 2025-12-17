@@ -137,6 +137,28 @@ class TestFirthCoxPH:
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
         np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
 
+        # # Wald p-values
+        # expected_pvalues = np.array([
+        #     0.0071472980682,  # separator
+        #     0.0001585898134,  # x1
+        #     0.0982873445066,  # x2
+        #     0.0008722446453,  # x3
+        # ])
+        # np.testing.assert_allclose(
+        #     model.wald_pvalues_, expected_pvalues, rtol=1e-6
+        # )
+
+        # LRT p-values
+        expected_lrt_pvalues = np.array(
+            [
+                7.318984974e-09,  # separator
+                1.686334002e-04,  # x1
+                9.295083722e-02,  # x2
+                8.463066114e-04,  # x3
+            ]
+        )
+        np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-6)
+
 
 class TestConcordanceIndex:
     def test_counts_concordant_discordant_pairs(self):
