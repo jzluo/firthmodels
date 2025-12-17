@@ -144,7 +144,7 @@ def profile_ci_bound(
             try:
                 G_inv = np.linalg.pinv(G)
             except np.linalg.LinAlgError:
-                # singular G; take damped step (pg 92)
+                # pinv failed (SVD did not converge); take damped step (pg 92)
                 theta = theta - 0.1 * v
                 continue
 
