@@ -6,6 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 
 from firthmodels import FirthLogisticRegression
+from firthmodels.logistic import compute_logistic_quantities
 
 
 class FirthLogit:
@@ -157,3 +158,8 @@ class FirthLogitResults:
         return self.estimator.conf_int(
             alpha=alpha, method=method, max_iter=max_iter, tol=tol
         )
+
+    def cov_params(self) -> NDArray[np.float64]:
+        X, y, sample_weight, offset = self.estimator._fit_data
+        q = compute_logistic_quantities(X, y, self.params, sample_weight, offset)
+        return np.linalg.inv(q.fisher_info)
