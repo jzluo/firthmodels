@@ -46,6 +46,11 @@ Homepage = "https://github.com/jzluo/firthmodels"
 Repository = "https://github.com/jzluo/firthmodels"
 Issues = "https://github.com/jzluo/firthmodels/issues"
 
+[project.optional-dependencies]
+formula = [
+    "formulaic>=1.2.1",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
