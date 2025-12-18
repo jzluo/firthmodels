@@ -82,25 +82,25 @@ class TestFirthLogitResults:
         assert ci.shape == (2, 2)  # 2 params, lower upper
 
     def test_pl_flag_controls_inference(self, toy_data):
-        """pl flag controls pvalues/bse; defaults to True (LRT)."""
+        """pl flag controls pvalues; bse is always Wald."""
         X, y = toy_data
         model = FirthLogit(y, X)
 
-        # Default (pl=True) uses LRT
+        # Default (pl=True) uses LRT p-values
         result_default = model.fit()
         assert not np.isnan(result_default.estimator.lrt_pvalues_).any()
         np.testing.assert_array_equal(
             result_default.pvalues, result_default.estimator.lrt_pvalues_
         )
-        np.testing.assert_array_equal(
-            result_default.bse, result_default.estimator.lrt_bse_
-        )
+        # bse is always Wald (logistf convention)
+        np.testing.assert_array_equal(result_default.bse, result_default.estimator.bse_)
 
-        # Explicit pl=False uses Wald
+        # Explicit pl=False uses Wald p-values
         result_wald = model.fit(pl=False)
         np.testing.assert_array_equal(
             result_wald.pvalues, result_wald.estimator.pvalues_
         )
+        # bse is still Wald
         np.testing.assert_array_equal(result_wald.bse, result_wald.estimator.bse_)
 
     def test_conf_int_respects_pl_flag(self, toy_data):

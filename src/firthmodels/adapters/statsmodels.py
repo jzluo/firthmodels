@@ -153,10 +153,9 @@ class FirthLogit:
             Maximum number of iterations.
         pl : bool, default True
             If True (recommended), use profile likelihood inference:
-            p-values from penalized likelihood ratio tests, standard errors
-            back-calculated from LRT, and profile likelihood confidence
-            intervals. If False, use Wald inference (faster but less accurate
-            for small samples).
+            p-values from penalized likelihood ratio tests and profile
+            likelihood confidence intervals. If False, use Wald inference
+            (faster but less accurate for small samples).
         gtol : float, default 1e-4
             Gradient tolerance for convergence.
         xtol : float, default 1e-4
@@ -234,11 +233,10 @@ class FirthLogitResults:
     params : ndarray
         Fitted coefficients.
     bse : ndarray
-        Standard errors. If `pl=True`, these are back-calculated from LRT
-        chi-squared statistics such that (coef/SE)^2 = chi^2. If `pl=False`,
-        these are Wald standard errors from the Fisher information matrix.
+        Wald standard errors from the inverse Fisher information matrix.
     tvalues : ndarray
-        z-statistics (params / bse).
+        Wald z-statistics (params / bse). Note: when `pl=True`, these do
+        not correspond to `pvalues` (which are from LRT).
     pvalues : ndarray
         Two-sided p-values. LRT if `pl=True`, Wald if `pl=False`.
     llf : float
@@ -258,10 +256,11 @@ class FirthLogitResults:
 
     Notes
     -----
-    The inference method (profile likelihood vs Wald) is determined at fit
-    time via the `pl` parameter and affects `bse`, `pvalues`, and the
-    default method for `conf_int()`. Profile likelihood is recommended
-    for the small-sample scenarios where Firth regression is typically used.
+    The `pl` parameter (set at fit time) controls `pvalues` and the default
+    method for `conf_int()`. Standard errors (`bse`) are always Wald-based,
+    following R's logistf convention. This means `tvalues` (Wald z) may not
+    correspond to `pvalues` (LRT) when `pl=True` - this is intentional, as
+    it keeps `bse` interpretable as a true standard error estimate.
     """
 
     def __init__(
@@ -280,7 +279,7 @@ class FirthLogitResults:
 
     @property
     def bse(self) -> NDArray[np.float64]:
-        return self.estimator.lrt_bse_ if self._pl else self.estimator.bse_
+        return self.estimator.bse_
 
     @property
     def tvalues(self) -> NDArray[np.float64]:
@@ -433,10 +432,8 @@ class FirthLogitResults:
 
         Notes
         -----
-        This always returns the Wald covariance matrix (inverse Fisher
-        information), regardless of the `pl` flag. When `pl=True`,
-        `sqrt(diag(cov_params()))` will not equal `self.bse` because
-        `bse` uses LRT-backcorrected standard errors in that case.
+        The diagonal elements are the squared Wald standard errors, i.e.,
+        `sqrt(diag(cov_params()))` equals `self.bse`.
         """
         X, y, sample_weight, offset = self.estimator._fit_data
         q = compute_logistic_quantities(X, y, self.params, sample_weight, offset)
