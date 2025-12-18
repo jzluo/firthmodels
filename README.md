@@ -11,10 +11,9 @@ Firth-penalized models in Python:
 
 - `FirthLogisticRegression`: scikit-learn–compatible Firth logistic regression
 - `FirthCoxPH`: scikit-learn–style Firth Cox proportional hazards
-- `FirthLogit`: statsmodels-style adapter for Firth logistic regression
 
-These are designed for small-sample settings and for cases where standard MLE breaks
-down due to (quasi-)complete separation / monotone likelihood.
+Firth penalization reduces small-sample bias and produces finite estimates even when
+standard MLE fails due to (quasi-)complete separation or monotone likelihood.
 
 ## Why Firth penalization?
 
@@ -30,9 +29,8 @@ near-perfect risk separation).
 Firth's method adds a penalty term that:
 - Produces **finite, well-defined estimates** even with separated data
 - **Reduces small-sample bias** in coefficient estimates
-- Works as a drop-in replacement for standard logistic regression
 
-This is common in:
+These problems are common in:
 - Case-control studies with rare exposures
 - Small clinical trials
 - Genome-wide or Phenome-wide association studies (GWAS/PheWAS)
@@ -49,7 +47,7 @@ Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.
 Optional dependencies:
 
 - Formula interface for the statsmodels adapter: `pip install firthmodels[formula]`
-(it's just [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
+(or simply install [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
 
 ## Quick start
 
@@ -74,11 +72,6 @@ print(model.bse_)         # Standard errors
 
 ### Firth Cox proportional hazards
 
-`FirthCoxPH` accepts survival outcomes as either:
-
-- a structured array with one boolean field (event) and one float field (time), or
-- a tuple `(event, time)`
-
 ```python
 import numpy as np
 from firthmodels import FirthCoxPH
@@ -87,23 +80,24 @@ X = np.array([[1.0], [0.0]])
 event = np.array([True, False])
 time = np.array([1.0, 2.0])
 
-y = np.empty(len(time), dtype=[("event", bool), ("time", np.float64)])
-y["event"] = event
-y["time"] = time
-
-model = FirthCoxPH().fit(X, y)
+model = FirthCoxPH().fit(X, (event, time))
 print(model.coef_)          # log hazard ratios
 print(model.pvalues_)       # Wald p-values
 
-# Baseline + individual survival curves at the training event times
+# Survival curves evaluated at the training event times
 S = model.predict_survival_function(X)  # shape: (n_samples, n_event_times)
 ```
+
+`FirthCoxPH` also accepts `y` as a structured array with boolean `event` and float `time`
+fields (scikit-survival style).
 
 ## Estimators
 
 ### scikit-learn compatible API
 
-`FirthLogisticRegression` follows the scikit-learn estimator API (`fit`, `predict`, `predict_proba`, `get_params`, `set_params`, etc.), and can be used with pipelines, cross-validation, and other sklearn tools:
+`FirthLogisticRegression` follows the scikit-learn estimator API
+(`fit`, `predict`, `predict_proba`, `get_params`, `set_params`, etc.), and can be used
+with pipelines, cross-validation, and other sklearn tools:
 
 ```python
 from sklearn.model_selection import cross_val_score
@@ -114,8 +108,10 @@ pipe = make_pipeline(StandardScaler(), FirthLogisticRegression())
 scores = cross_val_score(pipe, X, y, cv=5)
 ```
 
-`FirthCoxPH` also follows the sklearn estimator API (`fit`, `predict`, `score`, etc.). It additionally features a scikit-survival-like interface:
-  - methods: `fit(X, y)`, `predict(X)` (linear predictor), `score(X, y)` (C-index), `predict_survival_function(X, return_array=True)`,
+`FirthCoxPH` also follows the sklearn estimator API (`fit`, `predict`, `score`, etc.).
+It additionally features a scikit-survival-like interface:
+  - methods: `fit(X, y)`, `predict(X)` (linear predictor), `score(X, y)` (C-index),
+  `predict_survival_function(X, return_array=True)`,
   `predict_cumulative_hazard_function(X, return_array=True)`.
   - attributes: `unique_times_`, `cum_baseline_hazard_`, `baseline_survival_` (Breslow-style baseline).
 
@@ -137,7 +133,8 @@ model.lrt_pvalues_     # LRT p-values
 model.lrt_bse_         # Back-corrected standard errors (separate from Wald bse_)
 ```
 
-Each feature requires a separate constrained model fit, so you can test selectively to avoid unnecessary computation:
+Each feature requires a separate constrained model fit, so you can test selectively to
+avoid unnecessary computation:
 
 ```python
 model.lrt(0)              # Single feature by index
@@ -166,14 +163,14 @@ model.fit(X, y, offset=offset)
 ## Statsmodels adapter (`FirthLogit`)
 
 The statsmodels adapter wraps `FirthLogisticRegression` behind a statsmodels-like API
-and returns a results object with common statsmodels attributes/methods (`params`, `bse`, `pvalues`, `summary()`, `cov_params()`, etc.).
+and returns a results object with common statsmodels attributes/methods
+(`params`, `bse`, `pvalues`, `summary()`, `cov_params()`, etc.).
 
 Notes:
 
-- Unlike sklearn, `FirthLogit` does not add an intercept automatically; use
-`sm.add_constant(X)`.
+- Unlike sklearn, `FirthLogit` does not add an intercept automatically; use `sm.add_constant(X)`.
 - `fit(pl=True)` (default) computes likelihood ratio p-values and uses profile
-  likelihood confidence intervals by default, matching R logistf convention. Standard errors (`bse`) remain Wald standard errors .
+  likelihood confidence intervals by default, matching R logistf convention. Standard errors (`bse`) remain Wald standard errors.
 
 ```python
 import numpy as np
@@ -254,14 +251,13 @@ Key methods/attributes:
 
 Firth D (1993). Bias reduction of maximum likelihood estimates. *Biometrika* 80, 27-38.
 
+Heinze G, Schemper M (2001). A solution to the problem of monotone likelihood in Cox regression. *Biometrics* 57, 114-119.
+
 Heinze G, Schemper M (2002). A solution to the problem of separation in logistic regression. *Statistics in Medicine* 21, 2409-2419.
 
-Heinze, G., Schemper, M. (2001). A solution to the problem of monotone likelihood in Cox regression. *Biometrics* 57(1):114-119.
+Mbatchou J et al. (2021). Computationally efficient whole-genome regression for quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
 
-Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
-quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
-
-Venzon, D.J. and Moolgavkar, S.H. (1988). "A Method for Computing Profile-Likelihood-Based Confidence Intervals." *Applied Statistics*, 37(1), 87-94.
+Venzon DJ, Moolgavkar SH (1988). A method for computing profile-likelihood-based confidence intervals. *Applied Statistics* 37, 87-94.
 
 ## License
 
