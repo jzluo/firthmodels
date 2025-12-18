@@ -120,3 +120,17 @@ class TestFirthLogitResults:
         np.testing.assert_array_almost_equal(
             result_wald.conf_int(), result_wald.estimator.conf_int(method="wald")
         )
+
+    def test_summary_returns_summary_obj(self, fitted_results):
+        summary = fitted_results.summary()
+        assert hasattr(summary, "__str__")
+        assert "coef" in str(summary)  # basic check
+
+    def test_summary_frame_returns_dataframe(self, toy_data):
+        pd = pytest.importorskip("pandas")
+        X, y = toy_data
+        result = FirthLogit(y, X).fit()
+        df = result.summary_frame()
+        assert isinstance(df, pd.DataFrame)
+        expected_columns = {"coef", "std err", "z", "P>|z|", "[0.025", "0.975]"}
+        assert expected_columns.issubset(set(df.columns))
