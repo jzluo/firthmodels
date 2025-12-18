@@ -44,6 +44,7 @@ class FirthLogit:
         start_params: ArrayLike | None = None,
         method: Literal["newton"] = "newton",
         maxiter: int = 25,
+        pl: bool = True,
         **kwargs,  # gtol, xtol
     ):
         if start_params is not None:
@@ -65,14 +66,18 @@ class FirthLogit:
             xtol=xtol,
         )
         estimator.fit(self.exog, self.endog, offset=self.offset)
-
-        return FirthLogitResults(self, estimator)
+        if pl:
+            estimator.lrt()
+        return FirthLogitResults(self, estimator, pl=pl)
 
 
 class FirthLogitResults:
-    def __init__(self, model: FirthLogit, estimator: FirthLogisticRegression):
+    def __init__(
+        self, model: FirthLogit, estimator: FirthLogisticRegression, pl: bool = True
+    ):
         self.model = model
         self.estimator = estimator
+        self._pl = pl
 
     @property
     def params(self) -> NDArray[np.float64]:
@@ -80,17 +85,15 @@ class FirthLogitResults:
 
     @property
     def bse(self) -> NDArray[np.float64]:
-        return self.estimator.bse_
+        return self.estimator.lrt_bse_ if self._pl else self.estimator.bse_
 
     @property
     def tvalues(self) -> NDArray[np.float64]:
-        return self.estimator.coef_ / self.estimator.bse_
+        return self.params / self.bse
 
     @property
     def pvalues(self) -> NDArray[np.float64]:
-        tvals = self.tvalues
-        pvals = 2 * scipy.stats.norm.sf(np.abs(tvals))
-        return pvals
+        return self.estimator.lrt_pvalues_ if self._pl else self.estimator.pvalues_
 
     @property
     def llf(self) -> float:
@@ -111,6 +114,10 @@ class FirthLogitResults:
     @property
     def df_resid(self) -> int:
         return self.nobs - len(self.params)
+
+    @property
+    def mle_retvals(self) -> dict:
+        return {"converged": self.converged, "iterations": self.estimator.n_iter_}
 
     def predict(
         self,
@@ -135,11 +142,11 @@ class FirthLogitResults:
     def conf_int(
         self,
         alpha=0.05,
-        method: Literal["wald", "pl"] = "pl",
+        method: Literal["wald", "pl"] | None = None,
         **kwargs,  # maxiter, tol
     ) -> NDArray[np.float64]:
-        if method not in ["wald", "pl"]:
-            raise ValueError("Only 'wald' and 'pl' methods are supported for conf_int.")
+        if method is None:
+            method = "pl" if self._pl else "wald"
 
         max_iter = kwargs.pop("maxiter", 25)
         tol = kwargs.pop("tol", 1e-4)

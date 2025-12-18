@@ -80,3 +80,43 @@ class TestFirthLogitResults:
     def test_conf_int_shape(self, fitted_results):
         ci = fitted_results.conf_int()
         assert ci.shape == (2, 2)  # 2 params, lower upper
+
+    def test_pl_flag_controls_inference(self, toy_data):
+        """pl flag controls pvalues/bse; defaults to True (LRT)."""
+        X, y = toy_data
+        model = FirthLogit(y, X)
+
+        # Default (pl=True) uses LRT
+        result_default = model.fit()
+        assert not np.isnan(result_default.estimator.lrt_pvalues_).any()
+        np.testing.assert_array_equal(
+            result_default.pvalues, result_default.estimator.lrt_pvalues_
+        )
+        np.testing.assert_array_equal(
+            result_default.bse, result_default.estimator.lrt_bse_
+        )
+
+        # Explicit pl=False uses Wald
+        result_wald = model.fit(pl=False)
+        np.testing.assert_array_equal(
+            result_wald.pvalues, result_wald.estimator.pvalues_
+        )
+        np.testing.assert_array_equal(result_wald.bse, result_wald.estimator.bse_)
+
+    def test_conf_int_respects_pl_flag(self, toy_data):
+        """conf_int() default method depends on pl flag."""
+        X, y = toy_data
+        model = FirthLogit(y, X)
+
+        result_pl = model.fit(pl=True)
+        result_wald = model.fit(pl=False)
+
+        # pl=True gives profile CIs
+        np.testing.assert_array_almost_equal(
+            result_pl.conf_int(), result_pl.estimator.conf_int(method="pl")
+        )
+
+        # pl=False gives Wald CIs
+        np.testing.assert_array_almost_equal(
+            result_wald.conf_int(), result_wald.estimator.conf_int(method="wald")
+        )
