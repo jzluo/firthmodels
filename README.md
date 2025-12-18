@@ -5,14 +5,27 @@
 ![Pepy Total Downloads](https://img.shields.io/pepy/dt/firthmodels)
 ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fjzluo%2Ffirthmodels%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 ![GitHub License](https://img.shields.io/github/license/jzluo/firthmodels)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17863281.svg)](https://doi.org/10.5281/zenodo.17863281)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17863280.svg)](https://doi.org/10.5281/zenodo.17863280)
 
+Firth-penalized models in Python:
 
-Firth-penalized logistic regression in Python.
+- `FirthLogisticRegression`: scikit-learn–compatible Firth logistic regression
+- `FirthCoxPH`: scikit-learn–style Firth Cox proportional hazards
+- `FirthLogit`: statsmodels-style adapter for Firth logistic regression
+
+These are designed for small-sample settings and for cases where standard MLE breaks
+down due to (quasi-)complete separation / monotone likelihood.
 
 ## Why Firth penalization?
 
-Standard maximum-likelihood logistic regression fails when your data has complete or quasi-complete separation: when a predictor (or combination of predictors) perfectly separates the outcome classes. In these cases, MLE produces infinite coefficient estimates.
+Standard maximum-likelihood logistic regression fails when your data has complete or
+quasi-complete separation: when a predictor (or combination of predictors) perfectly
+separates the outcome classes. In these cases, MLE produces infinite coefficient
+estimates.
+
+In Cox proportional hazards, an analogous failure mode is monotone likelihood, where the
+partial likelihood becomes unbounded (often due to small samples, rare events, or
+near-perfect risk separation).
 
 Firth's method adds a penalty term that:
 - Produces **finite, well-defined estimates** even with separated data
@@ -33,7 +46,14 @@ pip install firthmodels
 
 Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.
 
+Optional dependencies:
+
+- Formula interface for the statsmodels adapter: `pip install firthmodels[formula]`
+(it's just [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
+
 ## Quick start
+
+### Firth logistic regression
 
 ```python
 import numpy as np
@@ -52,9 +72,36 @@ print(model.pvalues_)     # Wald p-values
 print(model.bse_)         # Standard errors
 ```
 
-## Features
+### Firth Cox proportional hazards
 
-### scikit-learn compatible
+`FirthCoxPH` accepts survival outcomes as either:
+
+- a structured array with one boolean field (event) and one float field (time), or
+- a tuple `(event, time)`
+
+```python
+import numpy as np
+from firthmodels import FirthCoxPH
+
+X = np.array([[1.0], [0.0]])
+event = np.array([True, False])
+time = np.array([1.0, 2.0])
+
+y = np.empty(len(time), dtype=[("event", bool), ("time", np.float64)])
+y["event"] = event
+y["time"] = time
+
+model = FirthCoxPH().fit(X, y)
+print(model.coef_)          # log hazard ratios
+print(model.pvalues_)       # Wald p-values
+
+# Baseline + individual survival curves at the training event times
+S = model.predict_survival_function(X)  # shape: (n_samples, n_event_times)
+```
+
+## Estimators
+
+### scikit-learn compatible API
 
 `FirthLogisticRegression` follows the scikit-learn estimator API (`fit`, `predict`, `predict_proba`, `get_params`, `set_params`, etc.), and can be used with pipelines, cross-validation, and other sklearn tools:
 
@@ -67,17 +114,27 @@ pipe = make_pipeline(StandardScaler(), FirthLogisticRegression())
 scores = cross_val_score(pipe, X, y, cv=5)
 ```
 
-### Likelihood ratio tests
+`FirthCoxPH` also follows the sklearn estimator API (`fit`, `predict`, `score`, etc.). It additionally features a scikit-survival-like interface:
+  - methods: `fit(X, y)`, `predict(X)` (linear predictor), `score(X, y)` (C-index), `predict_survival_function(X, return_array=True)`,
+  `predict_cumulative_hazard_function(X, return_array=True)`.
+  - attributes: `unique_times_`, `cum_baseline_hazard_`, `baseline_survival_` (Breslow-style baseline).
 
-Compute LRT p-values for individual coefficients. These are more reliable than Wald p-values for small samples.
+## Inference
 
-Standard errors are back-corrected from the LRT chi-squared statistic (as in regenie), ensuring that (beta/SE)² = chi². This is useful for meta-analysis where studies are weighted by 1/SE²:
+### Likelihood ratio tests (LRT)
+
+Both estimators support penalized likelihood ratio tests for individual coefficients.
+These are often more reliable than Wald p-values in small samples.
+
+`lrt()` populates `lrt_pvalues_` and `lrt_bse_` (a back-corrected standard error such
+that `(beta / lrt_bse_)**2` matches the 1-df chi-squared statistic), which can be
+useful for meta-analysis weighting:
 
 ```python
-model.fit(X, y).lrt()  # Compute LRT for all features
+model.fit(X, y).lrt()  # Compute LRT for all coefficients
 
 model.lrt_pvalues_     # LRT p-values
-model.lrt_bse_         # Back-corrected standard errors
+model.lrt_bse_         # Back-corrected standard errors (separate from Wald bse_)
 ```
 
 Each feature requires a separate constrained model fit, so you can test selectively to avoid unnecessary computation:
@@ -86,6 +143,8 @@ Each feature requires a separate constrained model fit, so you can test selectiv
 model.lrt(0)              # Single feature by index
 model.lrt([0, 2])         # Multiple features
 model.lrt(['snp', 'age']) # By name (if fitted with DataFrame)
+model.lrt(['snp', 2])     # Mixed
+
 ```
 
 ### Confidence intervals
@@ -94,6 +153,7 @@ model.lrt(['snp', 'age']) # By name (if fitted with DataFrame)
 model.conf_int()                    # 95% Wald CIs
 model.conf_int(alpha=0.1)           # 90% CIs
 model.conf_int(method='pl')         # Profile likelihood CIs (more accurate)
+model.conf_int(method='pl', features=['snp', 'age'])  # can selectively compute as with LRT
 ```
 
 ### Sample weights and offsets
@@ -103,20 +163,62 @@ model.fit(X, y, sample_weight=weights)
 model.fit(X, y, offset=offset)
 ```
 
-## API reference
+## Statsmodels adapter (`FirthLogit`)
 
-### Parameters
+The statsmodels adapter wraps `FirthLogisticRegression` behind a statsmodels-like API
+and returns a results object with common statsmodels attributes/methods (`params`, `bse`, `pvalues`, `summary()`, `cov_params()`, etc.).
+
+Notes:
+
+- Unlike sklearn, `FirthLogit` does not add an intercept automatically; use
+`sm.add_constant(X)`.
+- `fit(pl=True)` (default) computes likelihood ratio p-values and uses profile
+  likelihood confidence intervals by default, matching R logistf convention. Standard errors (`bse`) remain Wald standard errors .
+
+```python
+import numpy as np
+import statsmodels.api as sm
+from firthmodels.adapters.statsmodels import FirthLogit
+
+X = np.array([[1], [2], [3], [4], [5], [6]])
+y = np.array([0, 0, 0, 1, 1, 1])
+
+X = sm.add_constant(X)
+res = FirthLogit(y, X).fit()
+
+print(res.params)
+print(res.pvalues)      # LRT p-values when pl=True
+print(res.conf_int())   # profile likelihood CIs when pl=True
+print(res.summary())
+```
+
+### Formula interface
+
+If you install `firthmodels[formula]` (or `pip install formulaic`), you can fit from
+a formula and a pandas DataFrame:
+
+```python
+import pandas as pd
+from firthmodels.adapters.statsmodels import FirthLogit
+
+df = pd.DataFrame({"y": [0, 1, 0, 1], "age": [20, 30, 40, 50], "treatment": [0, 1, 0, 1]})
+res = FirthLogit.from_formula("y ~ age + treatment", df).fit()
+```
+
+## API notes
+
+### `FirthLogisticRegression` parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `fit_intercept` | `True` | Whether to fit an intercept term |
+| `fit_intercept` | `True` | Whether to add an intercept term |
 | `max_iter` | `25` | Maximum Newton-Raphson iterations |
 | `gtol` | `1e-4` | Gradient convergence tolerance (converged when max\|gradient\| < gtol) |
 | `xtol` | `1e-4` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
 | `max_step` | `5.0` | Maximum step size per coefficient |
 | `max_halfstep` | `25` | Maximum step-halvings per iteration |
 
-### Attributes (after fitting)
+### `FirthLogisticRegression` attributes (after fitting)
 
 | Attribute | Description |
 |-----------|-------------|
@@ -130,29 +232,31 @@ model.fit(X, y, offset=offset)
 | `lrt_pvalues_` | LRT p-values (after calling `lrt()`); includes intercept if `fit_intercept=True` |
 | `lrt_bse_` | Back-corrected SEs (after calling `lrt()`); includes intercept if `fit_intercept=True` |
 
-### Methods
 
-| Method | Description |
-|--------|-------------|
-| `fit(X, y)` | Fit the model |
-| `predict(X)` | Predict class labels |
-| `predict_proba(X)` | Predict class probabilities |
-| `predict_log_proba(X)` | Predict log class probabilities |
-| `decision_function(X)` | Return linear predictor values |
-| `lrt(features)` | Compute LRT p-values; `features` can be indices or column names. If `None`, tests all features. |
-| `conf_int(alpha, method)` | Confidence intervals; `method='wald'` (default) or `'pl'` for profile likelihood |
+### `FirthCoxPH` parameters
 
-## Roadmap
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_iter` | `50` | Maximum Newton-Raphson iterations |
+| `gtol` | `1e-4` | Gradient convergence tolerance (converged when max\|gradient\| < gtol) |
+| `xtol` | `1e-6` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
+| `max_step` | `5.0` | Maximum step size per coefficient |
+| `max_halfstep` | `5` | Maximum step-halvings per iteration |
 
-Current implementation uses a damped Newton–Raphson solver.
+Key methods/attributes:
 
-Add additional solvers (eg IRLS) and models (Cox proportional hazards).
+- `predict(X)` returns the linear predictor `X @ coef_` (log partial hazard).
+- `predict_cumulative_hazard_function(X)` returns an array evaluated at `unique_times_`.
+- `predict_survival_function(X)` returns an array evaluated at `unique_times_`.
+- Baseline functions: `unique_times_`, `cum_baseline_hazard_`, `baseline_survival_`.
 
 ## References
 
 Firth D (1993). Bias reduction of maximum likelihood estimates. *Biometrika* 80, 27-38.
 
 Heinze G, Schemper M (2002). A solution to the problem of separation in logistic regression. *Statistics in Medicine* 21, 2409-2419.
+
+Heinze, G., Schemper, M. (2001). A solution to the problem of monotone likelihood in Cox regression. *Biometrics* 57(1):114-119.
 
 Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
 quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
