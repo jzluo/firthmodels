@@ -1,7 +1,28 @@
+"""
+Statsmodels-style API adapter for Firth logistic regression.
+
+This module provides `FirthLogit`, a statsmodels-compatible wrapper
+around `firthmodels.FirthLogisticRegression` that uses Firth's
+penalized likelihood method.
+
+Example
+-------
+>>> import numpy as np
+>>> import statsmodels.api as sm
+>>> from firthmodels.adapters.statsmodels import FirthLogit
+>>>
+>>> # Separated data: standard logit would not converge
+>>> X = np.array([[1], [2], [3], [4], [5], [6]])
+>>> y = np.array([0, 0, 0, 1, 1, 1])  # perfect separation
+>>> X = sm.add_constant(X)
+>>>
+>>> result = FirthLogit(y, X).fit()
+>>> print(result.summary())
+"""
+
 from typing import Literal
 
 import numpy as np
-import scipy.stats
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 
@@ -10,6 +31,70 @@ from firthmodels.logistic import compute_logistic_quantities
 
 
 class FirthLogit:
+    """
+    Firth penalized logistic regression model with statsmodels-style API.
+
+    This class provides a statsmodels-compatible interface to Firth's
+    bias-reduced penalized likelihood estimation. Unlike standard maximum
+    likelihood, Firth regression produces finite coefficient estimates even
+    with perfect or quasi-complete separation.
+
+    Parameters
+    ----------
+    endog : array_like
+        Binary response variable (0/1 or boolean).
+    exog : array_like
+        Design matrix of explanatory variables. Unlike sklearn, this class
+        does NOT automatically add an intercept. Use `sm.add_constant(X)`
+        to add a constant column if desired.
+    offset : array_like, optional
+        Offset to be added to the linear predictor.
+    missing : {'none', 'raise'}, default 'none'
+        How to handle missing values. 'none' does no checking (NaN will
+        cause errors during fitting). 'raise' checks inputs and raises
+        ValueError if NaN is present. 'drop' is not supported.
+
+    Attributes
+    ----------
+    endog : ndarray
+        The response variable as a numpy array.
+    exog : ndarray
+        The design matrix as a numpy array.
+    exog_names : list of str
+        Names for the columns in exog. Taken from DataFrame column names
+        if exog is a DataFrame, otherwise generated as ['x1', 'x2', ...].
+    nobs : int
+        Number of observations.
+
+    See Also
+    --------
+    FirthLogisticRegression : The sklearn-compatible implementation.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import statsmodels.api as sm
+    >>> from firthmodels.adapters.statsmodels import FirthLogit
+
+    Basic usage with numpy arrays:
+
+    >>> X = np.random.randn(100, 2)
+    >>> y = (X[:, 0] + np.random.randn(100) > 0).astype(int)
+    >>> X = sm.add_constant(X)  # add intercept column
+    >>> result = FirthLogit(y, X).fit()
+    >>> result.params
+    array([...])
+
+    With pandas DataFrame (column names are preserved):
+
+    >>> import pandas as pd
+    >>> df = pd.DataFrame({'age': [25, 30, 35], 'treatment': [0, 1, 1]})
+    >>> X = sm.add_constant(df)
+    >>> y = [0, 1, 1]
+    >>> result = FirthLogit(y, X).fit()
+    >>> result.summary_frame()  # shows 'const', 'age', 'treatment' as row labels
+    """
+
     def __init__(
         self,
         endog: ArrayLike,
@@ -53,8 +138,57 @@ class FirthLogit:
         method: Literal["newton"] = "newton",
         maxiter: int = 25,
         pl: bool = True,
-        **kwargs,  # gtol, xtol
-    ):
+        **kwargs,
+    ) -> "FirthLogitResults":
+        """
+        Fit the Firth logistic regression model.
+
+        Parameters
+        ----------
+        start_params : array_like, optional
+            Not supported. Raises NotImplementedError if provided.
+        method : {'newton'}, default 'newton'
+            Optimization method. Only 'newton' (Newton-Raphson) is currently supported.
+        maxiter : int, default 25
+            Maximum number of iterations.
+        pl : bool, default True
+            If True (recommended), use profile likelihood inference:
+            p-values from penalized likelihood ratio tests, standard errors
+            back-calculated from LRT, and profile likelihood confidence
+            intervals. If False, use Wald inference (faster but less accurate
+            for small samples).
+        gtol : float, default 1e-4
+            Gradient tolerance for convergence.
+        xtol : float, default 1e-4
+            Parameter tolerance for convergence.
+
+        Returns
+        -------
+        FirthLogitResults
+            Results object containing fitted parameters and inference methods.
+
+        Notes
+        -----
+        The `pl` parameter controls which inference method is used throughout
+        the results object. Profile likelihood inference (`pl=True`) is
+        recommended for small samples and separated data, as Wald inference
+        can be unreliable in these settings. This matches the default behavior
+        of R's logistf package.
+
+        When `pl=True`, the likelihood ratio test is computed at fit time,
+        which adds computational overhead proportional to the number of
+        parameters.
+
+        Examples
+        --------
+        >>> result = FirthLogit(y, X).fit()  # pl=True by default
+        >>> result.pvalues  # LRT p-values
+        >>> result.conf_int()  # profile likelihood CIs
+
+        >>> result = FirthLogit(y, X).fit(pl=False)  # faster, Wald inference
+        >>> result.pvalues  # Wald p-values
+        >>> result.conf_int()  # Wald CIs
+        """
         if start_params is not None:
             raise NotImplementedError("start_params is not currently supported.")
         if method != "newton":
@@ -80,8 +214,61 @@ class FirthLogit:
 
 
 class FirthLogitResults:
+    """
+    Results from fitting a Firth logistic regression model.
+
+    This class provides statsmodels-style access to fitted parameters,
+    standard errors, p-values, confidence intervals, and model summaries.
+
+    Parameters
+    ----------
+    model : FirthLogit
+        The model that was fit.
+    estimator : FirthLogisticRegression
+        The underlying sklearn-style estimator.
+    pl : bool
+        Whether profile likelihood inference was used.
+
+    Attributes
+    ----------
+    params : ndarray
+        Fitted coefficients.
+    bse : ndarray
+        Standard errors. If `pl=True`, these are back-calculated from LRT
+        chi-squared statistics such that (coef/SE)^2 = chi^2. If `pl=False`,
+        these are Wald standard errors from the Fisher information matrix.
+    tvalues : ndarray
+        z-statistics (params / bse).
+    pvalues : ndarray
+        Two-sided p-values. LRT if `pl=True`, Wald if `pl=False`.
+    llf : float
+        Penalized log-likelihood at the fitted parameters.
+    converged : bool
+        Whether the optimizer converged.
+    nobs : int
+        Number of observations.
+    df_model : int
+        Model degrees of freedom (number of parameters minus 1).
+    df_resid : int
+        Residual degrees of freedom (nobs - number of parameters).
+    fittedvalues : ndarray
+        Predicted probabilities on the training data.
+    model : FirthLogit
+        Reference to the model object.
+
+    Notes
+    -----
+    The inference method (profile likelihood vs Wald) is determined at fit
+    time via the `pl` parameter and affects `bse`, `pvalues`, and the
+    default method for `conf_int()`. Profile likelihood is recommended
+    for the small-sample scenarios where Firth regression is typically used.
+    """
+
     def __init__(
-        self, model: FirthLogit, estimator: FirthLogisticRegression, pl: bool = True
+        self,
+        model: FirthLogit,
+        estimator: FirthLogisticRegression,
+        pl: bool = True,
     ):
         self.model = model
         self.estimator = estimator
@@ -140,6 +327,34 @@ class FirthLogitResults:
         offset: ArrayLike | None = None,
         **kwargs,
     ) -> NDArray[np.float64]:
+        """
+        Compute predicted probabilities.
+
+        Parameters
+        ----------
+        exog : array_like, optional
+            Design matrix for prediction. If not provided, uses the training
+            data (returning in-sample fitted values).
+        offset : array_like, optional
+            Offset for prediction. If `exog` is None, the training offset
+            is used. If `exog` is provided but `offset` is None, no offset
+            is applied (equivalent to zeros).
+        linear : bool, default False
+            If True, return the linear predictor (X @ beta + offset) instead
+            of probabilities.
+
+        Returns
+        -------
+        ndarray
+            Predicted probabilities P(y=1), or linear predictor if linear=True.
+
+        Examples
+        --------
+        >>> result = FirthLogit(y, X).fit()
+        >>> result.predict()  # in-sample probabilities
+        >>> result.predict(X_new)  # out-of-sample probabilities
+        >>> result.predict(X_new, linear=True)  # linear predictor
+        """
         if exog is None:
             exog = self.model.exog
             offset = self.model.offset
@@ -156,10 +371,41 @@ class FirthLogitResults:
 
     def conf_int(
         self,
-        alpha=0.05,
+        alpha: float = 0.05,
         method: Literal["wald", "pl"] | None = None,
-        **kwargs,  # maxiter, tol
+        **kwargs,
     ) -> NDArray[np.float64]:
+        """
+        Compute confidence intervals for the coefficients.
+
+        Parameters
+        ----------
+        alpha : float, default 0.05
+            Significance level. Default gives 95% confidence intervals.
+        method : {'wald', 'pl'}, optional
+            Method for computing confidence intervals. If not specified,
+            uses 'pl' (profile likelihood) if the model was fit with pl=True,
+            otherwise 'wald'. Profile likelihood CIs are more accurate for
+            small samples but slower to compute.
+        maxiter : int, default 25
+            Maximum iterations for profile likelihood CI computation.
+            Only used when method='pl'.
+        tol : float, default 1e-4
+            Convergence tolerance for profile likelihood CI computation.
+            Only used when method='pl'.
+
+        Returns
+        -------
+        ndarray, shape (k, 2)
+            Lower and upper confidence bounds for each parameter.
+
+        Examples
+        --------
+        >>> result = FirthLogit(y, X).fit()
+        >>> result.conf_int()  # 95% profile likelihood CIs (default)
+        >>> result.conf_int(alpha=0.1)  # 90% CIs
+        >>> result.conf_int(method='wald')  # Wald CIs (faster)
+        """
         if method is None:
             method = "pl" if self._pl else "wald"
 
@@ -174,12 +420,51 @@ class FirthLogitResults:
         )
 
     def cov_params(self) -> NDArray[np.float64]:
+        """
+        Compute the covariance matrix of the parameter estimates.
+
+        Returns the inverse of the observed Fisher information matrix,
+        which gives the asymptotic covariance of the estimates.
+
+        Returns
+        -------
+        ndarray, shape (k, k)
+            Covariance matrix of the fitted parameters.
+
+        Notes
+        -----
+        This always returns the Wald covariance matrix (inverse Fisher
+        information), regardless of the `pl` flag. When `pl=True`,
+        `sqrt(diag(cov_params()))` will not equal `self.bse` because
+        `bse` uses LRT-backcorrected standard errors in that case.
+        """
         X, y, sample_weight, offset = self.estimator._fit_data
         q = compute_logistic_quantities(X, y, self.params, sample_weight, offset)
         return np.linalg.inv(q.fisher_info)
 
     def summary(self, alpha: float = 0.05) -> "FirthSummary":
-        """Generate a summary of the regression results."""
+        """
+        Generate a text summary of the regression results.
+
+        Parameters
+        ----------
+        alpha : float, default 0.05
+            Significance level for confidence intervals.
+
+        Returns
+        -------
+        FirthSummary
+            Summary object with `__str__` method for printing.
+
+        Examples
+        --------
+        >>> result = FirthLogit(y, X).fit()
+        >>> print(result.summary())
+                              Firth Logistic Regression Results
+        ==============================================================================
+        Solver:            Newton-Raphson      No. Observations:         100
+        ...
+        """
         ci = self.conf_int(alpha=alpha)
         ci_lower = alpha / 2
         ci_upper = 1 - alpha / 2
@@ -264,7 +549,31 @@ class FirthLogitResults:
         return FirthSummary("\n".join(lines))
 
     def summary_frame(self, alpha: float = 0.05):
-        """Return summary as a pandas DataFrame."""
+        """
+        Return summary statistics as a pandas DataFrame.
+
+        Parameters
+        ----------
+        alpha : float, default 0.05
+            Significance level for confidence intervals.
+
+        Returns
+        -------
+        DataFrame
+            DataFrame with columns: coef, std err, z, P>|z|, and CI bounds.
+            Index contains the variable names from `model.exog_names`.
+
+        Raises
+        ------
+        ImportError
+            If pandas is not installed.
+
+        Examples
+        --------
+        >>> result = FirthLogit(y, X).fit()
+        >>> df = result.summary_frame()
+        >>> df[df['P>|z|'] < 0.05]  # significant coefficients
+        """
         try:
             import pandas as pd
         except ImportError as e:
@@ -288,6 +597,18 @@ class FirthLogitResults:
 
 
 class FirthSummary:
+    """
+    Container for regression summary text.
+
+    Wraps the formatted summary string and provides output methods
+    compatible with statsmodels Summary objects.
+
+    Parameters
+    ----------
+    text : str
+        The formatted summary text.
+    """
+
     def __init__(self, text: str):
         self._text = text
 
