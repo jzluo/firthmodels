@@ -22,9 +22,12 @@ Example
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 
@@ -140,11 +143,49 @@ class FirthLogit:
     def from_formula(
         cls,
         formula: str,
-        data,
+        data: pd.DataFrame,
         *,
         subset: ArrayLike | None = None,
         **kwargs,
     ) -> FirthLogit:
+        """
+        Create a FirthLogit model from a formula and DataFrame.
+
+        Parameters
+        ----------
+        formula : str
+            R-style formula, e.g., "y ~ x1 + x2 + C(group)".
+            Intercept is included by default; use "y ~ 0 + x" to exclude.
+        data : DataFrame
+            Data containing the variables referenced in the formula.
+        subset : array_like, optional
+            Boolean mask or index for subsetting rows.
+        **kwargs
+            Additional arguments passed to FirthLogit (e.g., `missing`).
+
+        Returns
+        -------
+        FirthLogit
+            Model instance ready to fit.
+
+        Raises
+        ------
+        ImportError
+            If patsy is not installed.
+
+        Examples
+        --------
+        >>> result = FirthLogit.from_formula("outcome ~ age + treatment", df).fit()
+        >>> print(result.summary())
+
+        With categorical variables (automatic dummy encoding):
+
+        >>> result = FirthLogit.from_formula("y ~ C(group) + age", df).fit()
+
+        Exclude intercept:
+
+        >>> result = FirthLogit.from_formula("y ~ 0 + x1 + x2", df).fit()
+        """
         try:
             import patsy
 
