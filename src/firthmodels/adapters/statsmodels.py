@@ -426,7 +426,7 @@ class FirthLogitResults:
         """
         Compute the covariance matrix of the parameter estimates.
 
-        Returns the inverse of the observed Fisher information matrix,
+        Returns the inverse of the augmented Fisher information matrix,
         which gives the asymptotic covariance of the estimates.
 
         Returns
