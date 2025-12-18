@@ -9,18 +9,16 @@ authors = [
 ]
 requires-python = ">=3.11"
 keywords = [
+    "firth",
     "firth logistic regression",
-    "bias-reduced logistic regression",
     "bias reduction",
     "penalized likelihood",
     "logistic regression",
-    "firth penalization",
     "rare events",
-    "data separation",
-    "complete separation",
-    "quasi-complete separation",
-    "small sample",
-    "statistics",
+    "separation",
+    "cox",
+    "cox proportional hazards",
+    "survival analysis",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
