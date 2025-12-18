@@ -246,7 +246,7 @@ class FirthLogitResults:
     nobs : int
         Number of observations.
     df_model : int
-        Model degrees of freedom (number of parameters minus 1).
+        Model degrees of freedom (number of non-constant predictors).
     df_resid : int
         Residual degrees of freedom (nobs - number of parameters).
     fittedvalues : ndarray
@@ -303,7 +303,8 @@ class FirthLogitResults:
 
     @property
     def df_model(self) -> int:
-        return len(self.params) - 1
+        n_constant = np.sum(np.ptp(self.model.exog, axis=0) == 0)
+        return len(self.params) - int(n_constant)
 
     @property
     def df_resid(self) -> int:
