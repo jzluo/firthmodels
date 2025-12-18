@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from firthmodels.adapters.statsmodels import FirthLogit
+from firthmodels.adapters.statsmodels import FirthLogit, FirthLogitResults
 
 
 @pytest.fixture
@@ -43,12 +43,6 @@ class TestFirthLogit:
         model = FirthLogit(data["A"], data[["B", "C"]])
         assert model.exog_names == ["B", "C"]
 
-    def test_check_rank_accepted(self, toy_data):
-        """just verify no error with check_rank (it's ignored for now)"""
-        X, y = toy_data
-        model = FirthLogit(y, X, check_rank=True)
-        model_no_check = FirthLogit(y, X, check_rank=False)
-
     def test_missing_raise_with_nan(self, toy_data):
         X, _ = toy_data
         y = np.array([0, 1, np.nan, 1])
@@ -59,3 +53,8 @@ class TestFirthLogit:
         X, y = toy_data
         with pytest.raises(NotImplementedError):
             model = FirthLogit(y, X, missing="drop")
+
+    def test_fit_returns_results(self, toy_data):
+        X, y = toy_data
+        results = FirthLogit(y, X).fit()
+        assert isinstance(results, FirthLogitResults)
