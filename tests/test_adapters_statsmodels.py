@@ -134,3 +134,44 @@ class TestFirthLogitResults:
         assert isinstance(df, pd.DataFrame)
         expected_columns = {"coef", "std err", "z", "P>|z|", "[0.025", "0.975]"}
         assert expected_columns.issubset(set(df.columns))
+
+
+class TestFromFormula:
+    @pytest.fixture
+    def sample_df(self):
+        pd = pytest.importorskip("pandas")
+        return pd.DataFrame(
+            {
+                "y": [0, 1, 0, 1, 1, 1],
+                "x1": [1, 2, 3, 4, 3, 2],
+                "x2": [1.5, 2.1, 3.3, 4.4, 3.2, 2.2],
+            }
+        )
+
+    def test_from_formula_basic(self, sample_df):
+        patsy = pytest.importorskip("patsy")
+        model = FirthLogit.from_formula("y ~ x1 + x2", data=sample_df)
+        assert model.exog.shape == (6, 3)
+        assert "Intercept" in model.exog_names
+
+    def test_from_formula_fit_works(self, sample_df):
+        patsy = pytest.importorskip("patsy")
+        result = FirthLogit.from_formula("y ~ x1", sample_df).fit()
+        assert result.params.shape == (2,)
+
+    def test_from_formula_no_intercept(self, sample_df):
+        patsy = pytest.importorskip("patsy")
+        model = FirthLogit.from_formula("y ~ 0 + x1", data=sample_df)
+        assert model.exog.shape == (6, 1)
+        assert "Intercept" not in model.exog_names
+
+    def test_from_formula_subset(self, sample_df):
+        patsy = pytest.importorskip("patsy")
+        subset = [True, True, True, False, False, True]
+        model = FirthLogit.from_formula("y ~ x1 + x2", data=sample_df, subset=subset)
+        assert model.nobs == 4
+
+    def test_from_formula_stores_formula(self, sample_df):
+        patsy = pytest.importorskip("patsy")
+        model = FirthLogit.from_formula("y ~ x1 + x2", sample_df)
+        assert model._formula == "y ~ x1 + x2"
