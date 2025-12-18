@@ -20,6 +20,8 @@ Example
 >>> print(result.summary())
 """
 
+from __future__ import annotations
+
 from typing import Literal, cast
 
 import numpy as np
@@ -125,12 +127,38 @@ class FirthLogit:
         else:
             self.exog_names = [f"x{i + 1}" for i in range(self.exog.shape[1])]
 
+        self._formula: str | None = None
+
     @property
     def nobs(self) -> int:
         return self.exog.shape[0]
 
     def __repr__(self) -> str:
         return f"<FirthLogit: nobs={self.nobs}, k={self.exog.shape[1]}>"
+
+    @classmethod
+    def from_formula(
+        cls,
+        formula: str,
+        data,
+        *,
+        subset: ArrayLike | None = None,
+        **kwargs,
+    ) -> FirthLogit:
+        try:
+            import patsy
+
+        except ImportError as e:
+            raise ImportError("patsy is required for from_formula()") from e
+
+        if subset is not None:
+            data = data.loc[subset]
+
+        endog, exog = patsy.dmatrices(formula, data, return_type="dataframe")
+
+        model = cls(endog.iloc[:, 0], exog, **kwargs)
+        model._formula = formula
+        return model
 
     def fit(
         self,
