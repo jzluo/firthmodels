@@ -40,6 +40,13 @@ class FirthLogit:
         else:
             self.exog_names = [f"x{i + 1}" for i in range(self.exog.shape[1])]
 
+    @property
+    def nobs(self) -> int:
+        return self.exog.shape[0]
+
+    def __repr__(self) -> str:
+        return f"<FirthLogit: nobs={self.nobs}, k={self.exog.shape[1]}>"
+
     def fit(
         self,
         start_params: ArrayLike | None = None,
@@ -119,6 +126,13 @@ class FirthLogitResults:
     @property
     def mle_retvals(self) -> dict:
         return {"converged": self.converged, "iterations": self.estimator.n_iter_}
+
+    @property
+    def fittedvalues(self) -> NDArray[np.float64]:
+        return self.predict()
+
+    def __repr__(self) -> str:
+        return f"<FirthLogitResults: nobs={self.nobs}, converged={self.converged}>"
 
     def predict(
         self,
