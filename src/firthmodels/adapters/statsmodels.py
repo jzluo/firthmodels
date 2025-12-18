@@ -20,7 +20,7 @@ Example
 >>> print(result.summary())
 """
 
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -355,13 +355,16 @@ class FirthLogitResults:
         >>> result.predict(X_new, linear=True)  # linear predictor
         """
         if exog is None:
-            exog = self.model.exog
-            offset = self.model.offset
+            exog_arr = self.model.exog
+            offset_arr = self.model.offset
+        else:
+            exog_arr = np.asarray(exog)
+            offset_arr = np.asarray(offset) if offset is not None else None
 
-        if offset is None:
-            offset = np.zeros(exog.shape[0])
+        if offset_arr is None:
+            offset_arr = np.zeros(exog_arr.shape[0])
 
-        linear_pred = exog @ self.params + offset
+        linear_pred = exog_arr @ self.params + offset_arr
 
         if kwargs.get("linear", False):
             return linear_pred
@@ -437,7 +440,7 @@ class FirthLogitResults:
         """
         X, y, sample_weight, offset = self.estimator._fit_data
         q = compute_logistic_quantities(X, y, self.params, sample_weight, offset)
-        return np.linalg.inv(q.fisher_info)
+        return cast(NDArray[np.float64], np.linalg.inv(q.fisher_info))
 
     def summary(self, alpha: float = 0.05) -> "FirthSummary":
         """
