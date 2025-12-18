@@ -171,7 +171,7 @@ class FirthLogit:
         Raises
         ------
         ImportError
-            If patsy is not installed.
+            If formulaic is not installed.
 
         Examples
         --------
@@ -187,15 +187,17 @@ class FirthLogit:
         >>> result = FirthLogit.from_formula("y ~ 0 + x1 + x2", df).fit()
         """
         try:
-            import patsy
-
+            from formulaic import model_matrix
         except ImportError as e:
-            raise ImportError("patsy is required for from_formula()") from e
+            raise ImportError(
+                "formulaic is required for from_formula(). "
+                "Install with: pip install formulaic"
+            ) from e
 
         if subset is not None:
             data = data.loc[subset]
 
-        endog, exog = patsy.dmatrices(formula, data, return_type="dataframe")
+        endog, exog = model_matrix(formula, data)
 
         model = cls(endog.iloc[:, 0], exog, **kwargs)
         model._formula = formula

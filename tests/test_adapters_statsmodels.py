@@ -149,29 +149,29 @@ class TestFromFormula:
         )
 
     def test_from_formula_basic(self, sample_df):
-        patsy = pytest.importorskip("patsy")
+        pytest.importorskip("formulaic")
         model = FirthLogit.from_formula("y ~ x1 + x2", data=sample_df)
         assert model.exog.shape == (6, 3)
         assert "Intercept" in model.exog_names
 
     def test_from_formula_fit_works(self, sample_df):
-        patsy = pytest.importorskip("patsy")
+        pytest.importorskip("formulaic")
         result = FirthLogit.from_formula("y ~ x1", sample_df).fit()
         assert result.params.shape == (2,)
 
     def test_from_formula_no_intercept(self, sample_df):
-        patsy = pytest.importorskip("patsy")
+        pytest.importorskip("formulaic")
         model = FirthLogit.from_formula("y ~ 0 + x1", data=sample_df)
         assert model.exog.shape == (6, 1)
         assert "Intercept" not in model.exog_names
 
     def test_from_formula_subset(self, sample_df):
-        patsy = pytest.importorskip("patsy")
+        pytest.importorskip("formulaic")
         subset = [True, True, True, False, False, True]
         model = FirthLogit.from_formula("y ~ x1 + x2", data=sample_df, subset=subset)
         assert model.nobs == 4
 
     def test_from_formula_stores_formula(self, sample_df):
-        patsy = pytest.importorskip("patsy")
+        pytest.importorskip("formulaic")
         model = FirthLogit.from_formula("y ~ x1 + x2", sample_df)
         assert model._formula == "y ~ x1 + x2"
