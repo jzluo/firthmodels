@@ -58,3 +58,25 @@ class TestFirthLogit:
         X, y = toy_data
         results = FirthLogit(y, X).fit()
         assert isinstance(results, FirthLogitResults)
+
+
+class TestFirthLogitResults:
+    @pytest.fixture
+    def fitted_results(self, toy_data):
+        X, y = toy_data
+        return FirthLogit(y, X).fit()
+
+    def test_predict_default_uses_training_data(self, fitted_results):
+        pred = fitted_results.predict()
+        assert pred.shape == (4,)
+        assert np.all((pred >= 0) & (pred <= 1))  # probabilities
+
+    def test_predict_new_data(self, fitted_results):
+        X_new = np.array([[1, 3], [9, 4]])
+        pred = fitted_results.predict(X_new)
+        assert pred.shape == (2,)
+        assert np.all((pred >= 0) & (pred <= 1))
+
+    def test_conf_int_shape(self, fitted_results):
+        ci = fitted_results.conf_int()
+        assert ci.shape == (2, 2)  # 2 params, lower upper

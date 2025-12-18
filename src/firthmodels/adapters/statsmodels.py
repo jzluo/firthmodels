@@ -3,6 +3,7 @@ from typing import Literal
 import numpy as np
 import scipy.stats
 from numpy.typing import ArrayLike, NDArray
+from scipy.special import expit
 
 from firthmodels import FirthLogisticRegression
 
@@ -110,3 +111,42 @@ class FirthLogitResults:
     @property
     def df_resid(self) -> int:
         return self.nobs - len(self.params)
+
+    def predict(
+        self,
+        exog: ArrayLike | None = None,
+        offset: ArrayLike | None = None,
+        **kwargs,
+    ) -> NDArray[np.float64]:
+        if exog is None:
+            exog = self.model.exog
+            offset = self.model.offset
+
+        if offset is None:
+            offset = np.zeros(exog.shape[0])
+
+        linear_pred = exog @ self.params + offset
+
+        if kwargs.get("linear", False):
+            return linear_pred
+
+        return expit(linear_pred)
+
+    def conf_int(
+        self,
+        alpha=0.05,
+        method: Literal["wald", "pl"] = "pl",
+        **kwargs,  # maxiter, tol
+    ) -> NDArray[np.float64]:
+        if method not in ["wald", "pl"]:
+            raise ValueError("Only 'wald' and 'pl' methods are supported for conf_int.")
+
+        max_iter = kwargs.pop("maxiter", 25)
+        tol = kwargs.pop("tol", 1e-4)
+        if kwargs:
+            raise TypeError(
+                f"conf_int() got unexpected keyword arguments: {list(kwargs.keys())}"
+            )
+        return self.estimator.conf_int(
+            alpha=alpha, method=method, max_iter=max_iter, tol=tol
+        )
