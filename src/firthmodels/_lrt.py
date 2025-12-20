@@ -79,8 +79,17 @@ def constrained_lrt_1df(
     k = beta_hat_full.shape[0]
     free_indices = [i for i in range(k) if i != idx]
 
+    # pre-allocate index arrays
+    beta_full = np.zeros(k, dtype=np.float64)
+    free_idx_array = np.array(free_indices, dtype=np.intp)
+    ix_grid = np.ix_(free_indices, free_indices)
+
     def constrained_quantities(beta_free: NDArray[np.float64]) -> _SlicedQuantities:
-        beta_full = np.insert(beta_free, idx, 0.0)
+        # update beta_full in-place
+        beta_full[:idx] = beta_free[:idx]
+        beta_full[idx] = 0.0
+        if idx < k - 1:
+            beta_full[idx + 1 :] = beta_free[idx:]
         q = compute_quantities_full(beta_full)
         return _SlicedQuantities(
             loglik=q.loglik,
