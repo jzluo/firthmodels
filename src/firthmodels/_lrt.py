@@ -93,8 +93,8 @@ def constrained_lrt_1df(
         q = compute_quantities_full(beta_full)
         return _SlicedQuantities(
             loglik=q.loglik,
-            modified_score=q.modified_score[free_indices],
-            fisher_info=q.fisher_info[np.ix_(free_indices, free_indices)],
+            modified_score=q.modified_score[free_idx_array],
+            fisher_info=q.fisher_info[ix_grid],
         )
 
     reduced_result = newton_raphson(
