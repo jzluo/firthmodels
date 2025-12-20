@@ -5,6 +5,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
+from scipy.linalg.lapack import dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
@@ -581,12 +582,16 @@ def compute_logistic_quantities(
     # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
     try:
         k = fisher_info.shape[0]
-        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
-        inv_fisher_info = scipy.linalg.cho_solve(
-            cho, np.eye(k, dtype=np.float64), check_finite=False
-        )
-        L = cho[0]
+
+        L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrf failed")
         logdet = 2.0 * np.sum(np.log(np.diag(L)))
+
+        inv_fisher_info, info = dpotrs(L, np.eye(k, dtype=np.float64), lower=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrs failed")
+
         solved = inv_fisher_info @ XtW
     except (
         scipy.linalg.LinAlgError
