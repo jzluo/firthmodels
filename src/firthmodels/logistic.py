@@ -600,7 +600,7 @@ class _Workspace:
         self.sqrt_w = np.empty(n, dtype=np.float64)
         self.XtW = np.empty((k, n), dtype=np.float64, order="F")
         self.fisher_info = np.zeros((k, k), dtype=np.float64, order="F")
-        self.I_k = np.eye(k, dtype=np.float64)
+        self.I_k = np.eye(k, dtype=np.float64, order="F")
         self.solved = np.empty((k, n), dtype=np.float64, order="F")
         self.h = np.empty(n, dtype=np.float64)
         self.w_aug = np.empty(n, dtype=np.float64)
