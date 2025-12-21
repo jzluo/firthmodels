@@ -5,7 +5,6 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
-from scipy.linalg.blas import dgemm, dsyrk
 from scipy.linalg.lapack import dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
