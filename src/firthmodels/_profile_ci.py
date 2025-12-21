@@ -133,7 +133,7 @@ def profile_ci_bound(
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         D = -q.fisher_info
-        G = D.copy()
+        G = D.copy(order="F")
         G[idx, :] = q.modified_score  # Jacobian (Eq. 3)
 
         # Appendix step 6: v = G^-1 F (direction to subtract)
