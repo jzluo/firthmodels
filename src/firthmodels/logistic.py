@@ -560,6 +560,37 @@ class LogisticQuantities:
     fisher_info: NDArray[np.float64]  # (n_features, n_features) X'WX
 
 
+class _Workspace:
+    """Pre-allocated arrays for compute_logistic_quantities"""
+
+    __slots__ = (
+        "eta",
+        "p",
+        "w",
+        "sqrt_w",
+        "XtW",
+        "I_k",
+        "h",
+        "w_aug",
+        "sqrt_w_aug",
+        "XtW_aug",
+        "residual",
+    )
+
+    def __init__(self, n: int, k: int) -> None:
+        self.eta = np.empty(n, dtype=np.float64)
+        self.p = np.empty(n, dtype=np.float64)
+        self.w = np.empty(n, dtype=np.float64)
+        self.sqrt_w = np.empty(n, dtype=np.float64)
+        self.XtW = np.empty((k, n), dtype=np.float64)
+        self.I_k = np.eye(k, dtype=np.float64)
+        self.h = np.empty(n, dtype=np.float64)
+        self.w_aug = np.empty(n, dtype=np.float64)
+        self.sqrt_w_aug = np.empty(n, dtype=np.float64)
+        self.XtW_aug = np.empty((k, n), dtype=np.float64)
+        self.residual = np.empty(n, dtype=np.float64)
+
+
 def compute_logistic_quantities(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
