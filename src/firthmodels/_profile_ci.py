@@ -5,6 +5,7 @@ from typing import Callable, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.linalg.lapack import dgetrf, dgetri
 
 from firthmodels._utils import IterationQuantities
 
@@ -137,7 +138,13 @@ def profile_ci_bound(
 
         # Appendix step 6: v = G^-1 F (direction to subtract)
         try:
-            G_inv = np.linalg.inv(G)
+            # G_inv = np.linalg.inv(G)
+            lu, piv, info = dgetrf(G, overwrite_a=0)
+            if info != 0:
+                raise np.linalg.LinAlgError("dgetrf failed")
+            G_inv, info = dgetri(lu, piv, overwrite_lu=1)
+            if info != 0:
+                raise np.linalg.LinAlgError("dgetri failed")
             v = G_inv @ F
         except np.linalg.LinAlgError:
             v = cast(NDArray[np.float64], np.linalg.lstsq(G, F, rcond=None)[0])
