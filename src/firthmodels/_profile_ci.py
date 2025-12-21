@@ -124,7 +124,7 @@ def profile_ci_bound(
         # TODO: the paper checks for relative change in loglik and the coefficients
         # between iterations. We're checking |loglik-l_star| directly, and the
         # |scores| of the nuisance parameters.
-        if np.max(np.abs(F)) <= tol:
+        if np.abs(F).max() <= tol:
             return ProfileCIBoundResult(
                 bound=theta[idx],
                 converged=True,

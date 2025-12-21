@@ -63,8 +63,8 @@ def newton_raphson(
             delta, *_ = np.linalg.lstsq(q.fisher_info, q.modified_score, rcond=None)
 
         # check convergence:
-        max_score = np.max(np.abs(q.modified_score))
-        max_delta = np.max(np.abs(delta))
+        max_score = np.abs(q.modified_score).max()
+        max_delta = np.abs(delta).max()
         if max_score < gtol and max_delta < xtol:
             return FirthResult(
                 beta=beta,
