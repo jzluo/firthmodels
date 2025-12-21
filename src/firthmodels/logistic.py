@@ -658,7 +658,7 @@ def compute_logistic_quantities(
             np.matmul(inv_fisher_info, ws.XtW, out=ws.solved)
 
         except scipy.linalg.LinAlgError:
-            solved, *_ = np.linalg.lstsq(ws.fisher_info, ws.XtW, rcond=None)
+            ws.solved[:] = np.linalg.lstsq(ws.fisher_info, ws.XtW, rcond=None)[0]
             sign, logdet = np.linalg.slogdet(ws.fisher_info)
             if sign <= 0:
                 # use -inf so loglik approaches -inf
@@ -719,7 +719,9 @@ def compute_logistic_quantities(
                 raise scipy.linalg.LinAlgError("dpotrf failed")
             logdet = 2.0 * np.log(L.diagonal()).sum()
 
-            inv_fisher_info, info = dpotrs(L, np.eye(k, dtype=np.float64), lower=1)
+            inv_fisher_info, info = dpotrs(
+                L, np.eye(k, dtype=np.float64, order="F"), lower=1
+            )
             if info != 0:
                 raise scipy.linalg.LinAlgError("dpotrs failed")
 
