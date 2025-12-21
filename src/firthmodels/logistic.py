@@ -247,6 +247,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self._profile_ci_computed: dict[
             tuple[float, float, int], NDArray[np.bool_]
         ] = {}
+
+        self._workspace = workspace
         return self
 
     def conf_int(
@@ -332,7 +334,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             l_star = self.loglik_ - chi2_crit / 2
 
             X, y, sample_weight, offset = self._fit_data
-            workspace = _Workspace(X.shape[0], X.shape[1])
 
             def compute_quantities_full(beta: NDArray[np.float64]):
                 return compute_logistic_quantities(
@@ -341,7 +342,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     beta=beta,
                     sample_weight=sample_weight,
                     offset=offset,
-                    workspace=workspace,
+                    workspace=self._workspace,
                 )
 
             theta_hat = (
@@ -440,7 +441,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             Index of the coefficient to test. Use len(coef_) for the intercept.
         """
         X, y, sample_weight, offset = self._fit_data
-        workspace = _Workspace(X.shape[0], X.shape[1])
 
         def compute_quantities_full(beta):
             return compute_logistic_quantities(
@@ -449,7 +449,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 beta=beta,
                 sample_weight=sample_weight,
                 offset=offset,
-                workspace=workspace,
+                workspace=self._workspace,
             )
 
         if self.fit_intercept:
