@@ -4,6 +4,7 @@ from typing import Callable
 import numpy as np
 import scipy
 from numpy.typing import NDArray
+from scipy.linalg.lapack import dpotrf, dpotrs
 from sklearn.exceptions import ConvergenceWarning
 
 from firthmodels._utils import FirthResult, IterationQuantities
@@ -49,14 +50,21 @@ def newton_raphson(
     for iteration in range(1, max_iter + 1):
         # solve for step: delta = (X'WX)^(-1) @ U*
         try:
-            cho = scipy.linalg.cho_factor(q.fisher_info, lower=True, check_finite=False)
-            delta = scipy.linalg.cho_solve(cho, q.modified_score, check_finite=False)
+            L, info = dpotrf(q.fisher_info, lower=1, overwrite_a=0)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrf failed")
+            # dpotrs needs F-contiguous RHS, score is 1D so reshape to column vector
+            score_col = q.modified_score.reshape(-1, 1, order="F")
+            delta, info = dpotrs(L, score_col, lower=1)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrs failed")
+            delta = delta.ravel()
         except scipy.linalg.LinAlgError:
             delta, *_ = np.linalg.lstsq(q.fisher_info, q.modified_score, rcond=None)
 
         # check convergence:
-        max_score = np.max(np.abs(q.modified_score))
-        max_delta = np.max(np.abs(delta))
+        max_score = np.abs(q.modified_score).max()
+        max_delta = np.abs(delta).max()
         if max_score < gtol and max_delta < xtol:
             return FirthResult(
                 beta=beta,

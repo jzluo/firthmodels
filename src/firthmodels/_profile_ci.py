@@ -5,6 +5,7 @@ from typing import Callable, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.linalg.lapack import dgetrf, dgetri
 
 from firthmodels._utils import IterationQuantities
 
@@ -123,7 +124,7 @@ def profile_ci_bound(
         # TODO: the paper checks for relative change in loglik and the coefficients
         # between iterations. We're checking |loglik-l_star| directly, and the
         # |scores| of the nuisance parameters.
-        if np.max(np.abs(F)) <= tol:
+        if np.abs(F).max() <= tol:
             return ProfileCIBoundResult(
                 bound=theta[idx],
                 converged=True,
@@ -132,12 +133,18 @@ def profile_ci_bound(
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         D = -q.fisher_info
-        G = D.copy()
+        G = D.copy(order="F")
         G[idx, :] = q.modified_score  # Jacobian (Eq. 3)
 
         # Appendix step 6: v = G^-1 F (direction to subtract)
         try:
-            G_inv = np.linalg.inv(G)
+            # G_inv = np.linalg.inv(G)
+            lu, piv, info = dgetrf(G, overwrite_a=0)
+            if info != 0:
+                raise np.linalg.LinAlgError("dgetrf failed")
+            G_inv, info = dgetri(lu, piv, overwrite_lu=1)
+            if info != 0:
+                raise np.linalg.LinAlgError("dgetri failed")
             v = G_inv @ F
         except np.linalg.LinAlgError:
             v = cast(NDArray[np.float64], np.linalg.lstsq(G, F, rcond=None)[0])

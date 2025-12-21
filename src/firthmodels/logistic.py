@@ -5,6 +5,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
+from scipy.linalg.lapack import dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
@@ -185,6 +186,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         n_features = X.shape[1]
 
         # === run solver ===
+        # pre-allocate workspace arrays to reduce allocations
+        workspace = _Workspace(n=X.shape[0], k=n_features)
+
         def compute_quantities(beta):
             return compute_logistic_quantities(
                 X=X,
@@ -192,6 +196,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 beta=beta,
                 sample_weight=sample_weight,
                 offset=offset,
+                workspace=workspace,
             )
 
         result = newton_raphson(
@@ -241,6 +246,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self._profile_ci_computed: dict[
             tuple[float, float, int], NDArray[np.bool_]
         ] = {}
+
+        self._workspace = workspace
         return self
 
     def conf_int(
@@ -329,7 +336,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
             def compute_quantities_full(beta: NDArray[np.float64]):
                 return compute_logistic_quantities(
-                    X=X, y=y, beta=beta, sample_weight=sample_weight, offset=offset
+                    X=X,
+                    y=y,
+                    beta=beta,
+                    sample_weight=sample_weight,
+                    offset=offset,
+                    workspace=self._workspace,
                 )
 
             theta_hat = (
@@ -436,6 +448,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 beta=beta,
                 sample_weight=sample_weight,
                 offset=offset,
+                workspace=self._workspace,
             )
 
         if self.fit_intercept:
@@ -559,63 +572,188 @@ class LogisticQuantities:
     fisher_info: NDArray[np.float64]  # (n_features, n_features) X'WX
 
 
+class _Workspace:
+    """Pre-allocated arrays for compute_logistic_quantities"""
+
+    __slots__ = (
+        "eta",
+        "p",
+        "w",
+        "sqrt_w",
+        "XtW",
+        "fisher_info",
+        "I_k",
+        "solved",
+        "h",
+        "w_aug",
+        "sqrt_w_aug",
+        "XtW_aug",
+        "fisher_info_aug",
+        "residual",
+        "temp_k",
+    )
+
+    def __init__(self, n: int, k: int) -> None:
+        self.eta = np.empty(n, dtype=np.float64)
+        self.p = np.empty(n, dtype=np.float64)
+        self.w = np.empty(n, dtype=np.float64)
+        self.sqrt_w = np.empty(n, dtype=np.float64)
+        self.XtW = np.empty((k, n), dtype=np.float64, order="F")
+        self.fisher_info = np.zeros((k, k), dtype=np.float64, order="F")
+        self.I_k = np.eye(k, dtype=np.float64, order="F")
+        self.solved = np.empty((k, n), dtype=np.float64, order="F")
+        self.h = np.empty(n, dtype=np.float64)
+        self.w_aug = np.empty(n, dtype=np.float64)
+        self.sqrt_w_aug = np.empty(n, dtype=np.float64)
+        self.XtW_aug = np.empty((k, n), dtype=np.float64, order="F")
+        self.fisher_info_aug = np.empty((k, k), dtype=np.float64, order="F")
+        self.residual = np.empty(n, dtype=np.float64)
+        self.temp_k = np.empty(k, dtype=np.float64)
+
+
 def compute_logistic_quantities(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
     beta: NDArray[np.float64],
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
+    workspace: _Workspace | None = None,
 ) -> LogisticQuantities:
     """Compute all quantities needed for one Newton-Raphson iteration."""
-    eta = X @ beta + offset
-    p = expit(eta)
+    n, k = X.shape
 
-    # W = diag(weights * p * (1-p))
-    w = sample_weight * p * (1 - p)
+    if workspace is not None:
+        # eta = X @ beta + offset
+        # p = expit(eta)
+        ws = workspace
+        np.dot(X, beta, out=ws.eta)
+        np.add(ws.eta, offset, out=ws.eta)
+        expit(ws.eta, out=ws.p)
 
-    # Fisher information: X'WX
-    sqrt_w = np.sqrt(w)
-    XtW = X.T * sqrt_w  # (k, n) broadcast so we don't materialize (n, n) diag matrix
-    fisher_info = XtW @ XtW.T
+        # w = sample_weight * p * (1 - p)
+        np.subtract(1.0, ws.p, out=ws.w)
+        np.multiply(ws.p, ws.w, out=ws.w)
+        np.multiply(sample_weight, ws.w, out=ws.w)
 
-    # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
-    try:
-        k = fisher_info.shape[0]
-        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
-        inv_fisher_info = scipy.linalg.cho_solve(
-            cho, np.eye(k, dtype=np.float64), check_finite=False
-        )
-        L = cho[0]
-        logdet = 2.0 * np.sum(np.log(np.diag(L)))
-        solved = inv_fisher_info @ XtW
-    except (
-        scipy.linalg.LinAlgError
-    ):  # fisher info not positive definite - fall back to pinv
-        solved, *_ = np.linalg.lstsq(fisher_info, XtW, rcond=None)
-        sign, logdet = np.linalg.slogdet(fisher_info)
-        if sign <= 0:
-            # use -inf so loglik approaches -inf
-            logdet = -np.inf
+        # # Fisher information: X'WX
+        # sqrt_w = np.sqrt(w)
+        # XtW = X.T * sqrt_w  # (k, n) broadcast so we don't materialize (n, n) diag matrix
+        # fisher_info = XtW @ XtW.T
+        np.sqrt(ws.w, out=ws.sqrt_w)
+        np.multiply(X.T, ws.sqrt_w, out=ws.XtW)
+        np.matmul(ws.XtW, ws.XtW.T, out=ws.fisher_info)
 
-    h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
+        try:
+            L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrf failed")
 
-    # augmented fisher information
-    w_aug = (sample_weight + h) * p * (1 - p)
-    sqrt_w_aug = np.sqrt(w_aug)
-    XtW_aug = X.T * sqrt_w_aug
-    fisher_info_aug = XtW_aug @ XtW_aug.T
+            np.log(L.diagonal(), out=ws.temp_k)
+            logdet = 2.0 * ws.temp_k.sum()
 
-    # L*(β) = Σ weight_i * [y_i*log(p_i) + (1-y_i)*log(1-p_i)] + 0.5*log|I(β)|
-    # y*log(p) + (1-y)*log(1-p) = y*eta - log(1+exp(eta))
-    # avoids log(0) when p>-0 or p->1
-    loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
+            inv_fisher_info, info = dpotrs(L, ws.I_k, lower=1)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrs failed")
 
-    # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
-    residual = sample_weight * (y - p) + h * (0.5 - p)
-    modified_score = X.T @ residual
+            np.matmul(inv_fisher_info, ws.XtW, out=ws.solved)
+
+        except scipy.linalg.LinAlgError:
+            ws.solved[:] = np.linalg.lstsq(ws.fisher_info, ws.XtW, rcond=None)[0]
+            sign, logdet = np.linalg.slogdet(ws.fisher_info)
+            if sign <= 0:
+                # use -inf so loglik approaches -inf
+                logdet = -np.inf
+
+        np.einsum(
+            "ij,ij->j", ws.solved, ws.XtW, out=ws.h
+        )  # h_i = solved[:,i] · XtW[:,i]
+
+        # augmented fisher information
+        # w_aug = (sample_weight + h) * p * (1 - p)
+        np.add(sample_weight, ws.h, out=ws.w_aug)
+        np.subtract(1.0, ws.p, out=ws.sqrt_w_aug)  # reuse
+        np.multiply(ws.w_aug, ws.p, out=ws.w_aug)
+        np.multiply(ws.w_aug, ws.sqrt_w_aug, out=ws.w_aug)
+
+        np.sqrt(ws.w_aug, out=ws.sqrt_w_aug)
+        np.multiply(X.T, ws.sqrt_w_aug, out=ws.XtW_aug)
+        np.matmul(ws.XtW_aug, ws.XtW_aug.T, out=ws.fisher_info_aug)
+
+        # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
+        np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
+        np.logaddexp(
+            0, ws.eta, out=ws.sqrt_w_aug
+        )  # reuse, sqrt_w_aug = log(1 + exp(eta))
+        np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
+        loglik = sample_weight @ ws.w + 0.5 * logdet
+
+        # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
+        # residual = sample_weight * (y - p) + h * (0.5 - p)
+        np.subtract(y, ws.p, out=ws.residual)
+        np.multiply(sample_weight, ws.residual, out=ws.residual)
+        np.subtract(0.5, ws.p, out=ws.w)  # reuse, w = 0.5 - p
+        np.multiply(ws.h, ws.w, out=ws.w)
+        np.add(ws.residual, ws.w, out=ws.residual)
+        modified_score = X.T @ ws.residual
+
+    else:
+        eta = X @ beta + offset
+        p = expit(eta)
+
+        # W = diag(weights * p * (1-p))
+        w = sample_weight * p * (1 - p)
+
+        # Fisher information: X'WX
+        sqrt_w = np.sqrt(w)
+        XtW = (
+            X.T * sqrt_w
+        )  # (k, n) broadcast so we don't materialize (n, n) diag matrix
+        fisher_info = XtW @ XtW.T
+
+        # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
+        try:
+            k = fisher_info.shape[0]
+
+            L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrf failed")
+            logdet = 2.0 * np.log(L.diagonal()).sum()
+
+            inv_fisher_info, info = dpotrs(
+                L, np.eye(k, dtype=np.float64, order="F"), lower=1
+            )
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrs failed")
+
+            solved = inv_fisher_info @ XtW
+        except (
+            scipy.linalg.LinAlgError
+        ):  # fisher info not positive definite - fall back to pinv
+            solved, *_ = np.linalg.lstsq(fisher_info, XtW, rcond=None)
+            sign, logdet = np.linalg.slogdet(fisher_info)
+            if sign <= 0:
+                # use -inf so loglik approaches -inf
+                logdet = -np.inf
+
+        h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
+
+        # augmented fisher information
+        w_aug = (sample_weight + h) * p * (1 - p)
+        sqrt_w_aug = np.sqrt(w_aug)
+        XtW_aug = X.T * sqrt_w_aug
+        fisher_info_aug = XtW_aug @ XtW_aug.T
+
+        # L*(β) = Σ weight_i * [y_i*log(p_i) + (1-y_i)*log(1-p_i)] + 0.5*log|I(β)|
+        # y*log(p) + (1-y)*log(1-p) = y*eta - log(1+exp(eta))
+        # avoids log(0) when p>-0 or p->1
+        loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
+
+        # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
+        residual = sample_weight * (y - p) + h * (0.5 - p)
+        modified_score = X.T @ residual
 
     return LogisticQuantities(
         loglik=loglik,
         modified_score=modified_score,
-        fisher_info=fisher_info_aug,
+        fisher_info=ws.fisher_info_aug if workspace else fisher_info_aug,
     )
