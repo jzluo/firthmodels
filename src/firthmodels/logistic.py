@@ -5,6 +5,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
+from scipy.linalg.blas import dgemm, dsyrk
 from scipy.linalg.lapack import dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -648,7 +649,7 @@ def compute_logistic_quantities(
             if info != 0:
                 raise scipy.linalg.LinAlgError("dpotrf failed")
 
-            np.log(np.diag(L), out=ws.temp_k)
+            np.log(L.diagonal(), out=ws.temp_k)
             logdet = 2.0 * np.sum(ws.temp_k)
 
             inv_fisher_info, info = dpotrs(L, ws.I_k, lower=1)
@@ -717,7 +718,7 @@ def compute_logistic_quantities(
             L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
             if info != 0:
                 raise scipy.linalg.LinAlgError("dpotrf failed")
-            logdet = 2.0 * np.sum(np.log(np.diag(L)))
+            logdet = 2.0 * np.sum(np.log(L.diagonal()))
 
             inv_fisher_info, info = dpotrs(L, np.eye(k, dtype=np.float64), lower=1)
             if info != 0:
