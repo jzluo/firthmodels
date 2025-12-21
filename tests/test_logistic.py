@@ -2,6 +2,7 @@ import warnings
 
 import numpy as np
 import pytest
+import scipy
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
 from firthmodels import FirthLogisticRegression
@@ -172,3 +173,69 @@ class TestFirthLogisticRegression:
 
         with pytest.raises(KeyError, match="Unknown feature"):
             model.lrt("nonexistent")
+
+    def test_cholesky_fallback_in_compute_quantities(
+        self, separation_data, monkeypatch
+    ):
+        """Fallback to lstsq in compute_logistic_quantities produces equivalent results."""
+        import scipy.linalg
+
+        X, y = separation_data
+        model_normal = FirthLogisticRegression().fit(X, y)
+
+        def fake_dpotrf(*args, **kwargs):
+            raise scipy.linalg.LinAlgError("forced failure")
+
+        monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
+        model_fallback = FirthLogisticRegression().fit(X, y)
+
+        np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
+        np.testing.assert_allclose(
+            model_fallback.intercept_, model_normal.intercept_, rtol=1e-6
+        )
+
+    def test_cholesky_fallback_in_solver(self, separation_data, monkeypatch):
+        """Fallback to lstsq in newton_raphson solver produces equivalent results."""
+        X, y = separation_data
+        model_normal = FirthLogisticRegression().fit(X, y)
+
+        def fake_dpotrf(*args, **kwargs):
+            raise scipy.linalg.LinAlgError("forced failure")
+
+        monkeypatch.setattr("firthmodels._solvers.dpotrf", fake_dpotrf)
+        model_fallback = FirthLogisticRegression().fit(X, y)
+
+        np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
+        np.testing.assert_allclose(
+            model_fallback.intercept_, model_normal.intercept_, rtol=1e-6
+        )
+
+    def test_profile_ci_solve_fallback(self, separation_data, monkeypatch):
+        """Fallback to lstsq in profile CI initialization produces equivalent results."""
+        X, y = separation_data
+        model = FirthLogisticRegression().fit(X, y)
+        ci_normal = model.conf_int(method="pl", features=[0])
+
+        def fake_solve(*args, **kwargs):
+            raise np.linalg.LinAlgError("forced failure")
+
+        monkeypatch.setattr("numpy.linalg.solve", fake_solve)
+        model2 = FirthLogisticRegression().fit(X, y)
+        ci_fallback = model2.conf_int(method="pl", features=[0])
+
+        np.testing.assert_allclose(ci_fallback, ci_normal, rtol=1e-6)
+
+    def test_profile_ci_inv_fallback(self, separation_data, monkeypatch):
+        """Fallback to lstsq/pinv in profile CI iteration produces equivalent results."""
+        X, y = separation_data
+        model = FirthLogisticRegression().fit(X, y)
+        ci_normal = model.conf_int(method="pl", features=[0])
+
+        def fake_dgetrf(*args, **kwargs):
+            raise np.linalg.LinAlgError("forced failure")
+
+        monkeypatch.setattr("firthmodels._profile_ci.dgetrf", fake_dgetrf)
+        model2 = FirthLogisticRegression().fit(X, y)
+        ci_fallback = model2.conf_int(method="pl", features=[0])
+
+        np.testing.assert_allclose(ci_fallback, ci_normal, rtol=1e-6)
