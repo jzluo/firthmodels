@@ -10,10 +10,12 @@
 Firth-penalized models in Python:
 
 - `FirthLogisticRegression`: scikit-learn–compatible Firth logistic regression
-- `FirthCoxPH`: scikit-learn–style Firth Cox proportional hazards
+- `FirthCoxPH`: scikit-survival-style Firth Cox proportional hazards
 
 Firth penalization reduces small-sample bias and produces finite estimates even when
 standard MLE fails due to (quasi-)complete separation or monotone likelihood.
+
+See #12 and #32 for benchmarking results.
 
 ## Why Firth penalization?
 
