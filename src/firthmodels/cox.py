@@ -741,9 +741,7 @@ def compute_cox_quantities(
         inv_fisher_info = np.linalg.pinv(fisher_info)
 
     # Firth correction: a_t = 0.5 * trace(I^{-1} * dI/d beta_t).
-    firth_correction = 0.5 * np.einsum(
-        "rs,trs->t", inv_fisher_info, dI_dbeta, optimize=True
-    )
+    firth_correction = 0.5 * dI_dbeta.reshape(k, -1) @ inv_fisher_info.ravel()
     modified_score = score + firth_correction
     loglik = loglik + 0.5 * logdet
 
