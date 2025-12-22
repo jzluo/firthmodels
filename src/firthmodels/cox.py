@@ -7,6 +7,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
+from scipy.linalg.lapack import dpotrf, dpotrs
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -740,11 +741,18 @@ def compute_cox_quantities(
 
     # log|I| and I^{-1} for Firth correction
     try:
-        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
-        logdet = 2.0 * np.sum(np.log(np.diag(cho[0])))
-        inv_fisher_info = scipy.linalg.cho_solve(
-            cho, np.eye(k, dtype=np.float64), check_finite=False
+        L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrf failed")
+
+        # logdet = 2.0 * np.sum(np.log(np.diag(L)))
+        logdet = 2.0 * np.log(L.diagonal()).sum()
+
+        inv_fisher_info, info = dpotrs(
+            L, np.eye(k, dtype=np.float64, order="F"), lower=1
         )
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
