@@ -582,7 +582,7 @@ class _Workspace:
         "sqrt_w",
         "XtW",
         "fisher_info",
-        "I_k",
+        "eye_k",
         "solved",
         "h",
         "w_aug",
@@ -600,7 +600,7 @@ class _Workspace:
         self.sqrt_w = np.empty(n, dtype=np.float64)
         self.XtW = np.empty((k, n), dtype=np.float64, order="F")
         self.fisher_info = np.zeros((k, k), dtype=np.float64, order="F")
-        self.I_k = np.eye(k, dtype=np.float64, order="F")
+        self.eye_k = np.eye(k, dtype=np.float64, order="F")
         self.solved = np.empty((k, n), dtype=np.float64, order="F")
         self.h = np.empty(n, dtype=np.float64)
         self.w_aug = np.empty(n, dtype=np.float64)
@@ -651,7 +651,7 @@ def compute_logistic_quantities(
             np.log(L.diagonal(), out=ws.temp_k)
             logdet = 2.0 * ws.temp_k.sum()
 
-            inv_fisher_info, info = dpotrs(L, ws.I_k, lower=1)
+            inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
             if info != 0:
                 raise scipy.linalg.LinAlgError("dpotrs failed")
 

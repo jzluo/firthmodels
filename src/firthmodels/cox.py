@@ -642,7 +642,7 @@ class _Workspace:
         "wXh",
         "A_cumsum",
         "B_cumsum",
-        "I_k",
+        "eye_k",
     )
 
     def __init__(self, n_samples: int, n_features: int) -> None:
@@ -655,7 +655,7 @@ class _Workspace:
         self.wXh = np.empty((n, k), dtype=np.float64)
         self.A_cumsum = np.empty((n, k), dtype=np.float64)
         self.B_cumsum = np.empty(n, dtype=np.float64)
-        self.I_k = np.eye(k, dtype=np.float64, order="F")
+        self.eye_k = np.eye(k, dtype=np.float64, order="F")
 
 
 def compute_cox_quantities(
@@ -742,7 +742,7 @@ def compute_cox_quantities(
 
         logdet = 2.0 * np.log(L.diagonal()).sum()
 
-        inv_fisher_info, info = dpotrs(L, ws.I_k, lower=1)
+        inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
