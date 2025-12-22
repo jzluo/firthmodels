@@ -112,10 +112,11 @@ class FirthCoxPH(BaseEstimator):
 
         # Precompute sorted data and block structure
         precomputed = _CoxPrecomputed.from_data(X, time, event)
+        workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
         # Create closure for newton_raphson
         def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-            return compute_cox_quantities(beta, precomputed)
+            return compute_cox_quantities(beta, precomputed, workspace)
 
         # Run optimizer
         result = newton_raphson(
@@ -143,8 +144,9 @@ class FirthCoxPH(BaseEstimator):
         z = result.beta / self.bse_
         self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
 
-        # need these for LRT
+        # need these for LRT and profile CI
         self._precomputed = precomputed
+        self._workspace = workspace
 
         self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
@@ -216,10 +218,7 @@ class FirthCoxPH(BaseEstimator):
 
         def compute_quantities_full(beta):
             return compute_cox_quantities(
-                precomputed=self._precomputed,
-                beta=beta,
-                # sample_weight=sample_weight,
-                # offset=offset,
+                beta=beta, precomputed=self._precomputed, workspace=self._workspace
             )
 
         beta_hat_full = self.coef_
@@ -348,7 +347,9 @@ class FirthCoxPH(BaseEstimator):
             l_star = self.loglik_ - chi2_crit / 2
 
             def compute_quantities_full(beta: NDArray[np.float64]):
-                return compute_cox_quantities(beta=beta, precomputed=self._precomputed)
+                return compute_cox_quantities(
+                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                )
 
             theta_hat = self.coef_.copy()
 
@@ -660,6 +661,7 @@ class _Workspace:
 def compute_cox_quantities(
     beta: NDArray[np.float64],
     precomputed: _CoxPrecomputed,
+    workspace: _Workspace,
 ) -> CoxQuantities:
     """
     Compute all quantities needed for one Newton-Raphson iteration.
@@ -670,6 +672,8 @@ def compute_cox_quantities(
         Current coefficient estimates.
     precomputed : _CoxPrecomputed
         Precomputed data from _CoxPrecomputed.from_data().
+    workspace : _Workspace
+        Pre-allocated arrays to avoid repeated memory allocation.
 
     Returns
     -------
@@ -682,6 +686,7 @@ def compute_cox_quantities(
     block_s = precomputed.block_s
     n_blocks = precomputed.n_blocks
     k = precomputed.n_features
+    ws = workspace
 
     # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
     # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
@@ -690,10 +695,15 @@ def compute_cox_quantities(
     risk = np.exp(eta - c)
 
     # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
-    wX = X * risk[:, None]
-    S0_cumsum = np.cumsum(risk)
-    S1_cumsum = np.cumsum(wX, axis=0)
-    S2_cumsum = np.cumsum(wX[:, :, None] * X[:, None, :], axis=0)
+    np.multiply(X, risk[:, None], out=ws.wX)
+    wX = ws.wX
+    np.cumsum(risk, out=ws.S0_cumsum)
+    S0_cumsum = ws.S0_cumsum
+    np.cumsum(wX, axis=0, out=ws.S1_cumsum)
+    S1_cumsum = ws.S1_cumsum
+    np.multiply(wX[:, :, None], X[:, None, :], out=ws.outer_prod)
+    np.cumsum(ws.outer_prod, axis=0, out=ws.S2_cumsum)
+    S2_cumsum = ws.S2_cumsum
 
     # Index at block boundaries to get risk-set sums at each unique time
     block_end_indices = block_ends - 1
@@ -732,9 +742,7 @@ def compute_cox_quantities(
 
         logdet = 2.0 * np.log(L.diagonal()).sum()
 
-        inv_fisher_info, info = dpotrs(
-            L, np.eye(k, dtype=np.float64, order="F"), lower=1
-        )
+        inv_fisher_info, info = dpotrs(L, ws.I_k, lower=1)
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
@@ -751,9 +759,11 @@ def compute_cox_quantities(
     # Cumulative sums for the contracted S3 term and trace term
     # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
     # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
-    wXh = wX * h[:, None]
-    A_cumsum = np.cumsum(wXh, axis=0)
-    B_cumsum = np.cumsum(risk * h)
+    np.multiply(wX, h[:, None], out=ws.wXh)
+    np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
+    A_cumsum = ws.A_cumsum
+    np.cumsum(risk * h, out=ws.B_cumsum)
+    B_cumsum = ws.B_cumsum
 
     # Index at event block boundaries
     event_block_indices = block_end_indices[event_mask]
