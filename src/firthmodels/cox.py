@@ -719,10 +719,13 @@ def compute_cox_quantities(
         # V_{rt} = S_{rt}/S0 - S_r S_t/S0^2.
         S0_inv2 = S0_inv * S0_inv
         term1 = S3.transpose(2, 0, 1) * S0_inv - (  # S3 is (r,s,t)
-            np.einsum("rs,t->trs", S2, S1, optimize=True) * S0_inv2
+            S1[:, None, None] * S2[None, :, :] * S0_inv2
         )
-        term2 = np.einsum("s,rt->trs", S1 * S0_inv, V, optimize=True)
-        term3 = np.einsum("r,st->trs", S1 * S0_inv, V, optimize=True)
+        # term2 = np.einsum("s,rt->trs", S1 * S0_inv, V, optimize=True)
+        term2 = V.T[:, :, None] * x_bar[None, None, :]  # V[t,r] * x_bar[s]
+        # term3 = np.einsum("r,st->trs", S1 * S0_inv, V, optimize=True)
+        term3 = V.T[:, None, :] * x_bar[None, :, None]  # V[t,s] * x_bar[r]
+
         dI_dbeta += d * (term1 - term2 - term3)
 
         start = end
