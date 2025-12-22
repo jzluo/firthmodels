@@ -682,7 +682,6 @@ def compute_cox_quantities(
     block_ends = precomputed.block_ends
     block_d = precomputed.block_d
     block_s = precomputed.block_s
-    n_blocks = precomputed.n_blocks
     k = precomputed.n_features
     ws = workspace
 
@@ -745,6 +744,7 @@ def compute_cox_quantities(
             logdet = -np.inf
         inv_fisher_info = np.linalg.pinv(fisher_info)
 
+    # avoid O(n k^3) S3 tensor by swapping the summation order:
     # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
     # where h[i] = X[i] @ I_inv @ X[i] is the hat matrix diagonal.
     XI = X @ inv_fisher_info
