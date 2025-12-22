@@ -660,39 +660,27 @@ def compute_cox_quantities(
     c = np.max(eta)
     risk = np.exp(eta - c)
 
-    # Initialize (scaled) risk-set sums computed with risk = exp(eta - c).
+    # S0, S1, S2, S3 are cumulative sums over the risk set (everyone with time >= t).
     S0 = 0.0
     S1 = np.zeros(k, dtype=np.float64)
     S2 = np.zeros((k, k), dtype=np.float64)
     S3 = np.zeros((k, k, k), dtype=np.float64)
 
-    loglik = 0.0
-    score = np.zeros(k, dtype=np.float64)
-    fisher_info = np.zeros((k, k), dtype=np.float64)
-    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
-    # dI_dbeta[t, r, s] = dI_rs / d beta_t.
+    S0_at_blocks = np.zeros(n_blocks, dtype=np.float64)
+    S1_at_blocks = np.zeros((n_blocks, k), dtype=np.float64)
+    S2_at_blocks = np.zeros((n_blocks, k, k), dtype=np.float64)
+    S3_at_blocks = np.zeros((n_blocks, k, k, k), dtype=np.float64)
 
-    # Walk blocks in descending time order
+    # loop 1: Accumulate risk-set sums at each block boundary.
     start = 0
     for b in range(n_blocks):
         end = block_ends[b]
-
         block_X = X[start:end]
         block_risk = risk[start:end]
 
         # update risk-set sums (everyone in the block enters the risk set)
         S0 += block_risk.sum()
-        # S1 += block_X.T @ block_risk
-        # S2 += (block_X * block_risk[:, None]).T @ block_X
-        # S3 += np.einsum(
-        #     "i,ir,is,it->rst",
-        #     block_risk,
-        #     block_X,
-        #     block_X,
-        #     block_X,
-        #     optimize=True,
-        # )
-        weighted_X = block_X * block_risk[:, None]  # (n_block, k)
+        weighted_X = block_X * block_risk[:, None]
         S1 += weighted_X.sum(axis=0)
         S2 += weighted_X.T @ block_X
         # S3[r,s,t] = sum_i risk[i] * X[i,r] * X[i,s] * X[i,t]
@@ -700,12 +688,32 @@ def compute_cox_quantities(
             weighted_X, block_X[:, :, None] * block_X[:, None, :], axes=([0], [0])
         )
 
+        # Store cumulative sums at this block boundary
+        S0_at_blocks[b] = S0
+        S1_at_blocks[b] = S1
+        S2_at_blocks[b] = S2
+        S3_at_blocks[b] = S3
+
+        start = end
+
+    # loop 2: compute likelihood contributions for blocks with events.
+    loglik = 0.0
+    score = np.zeros(k, dtype=np.float64)
+    fisher_info = np.zeros((k, k), dtype=np.float64)
+    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
+    # dI_dbeta[t, r, s] = dI_rs / d beta_t.
+
+    for b in range(n_blocks):
         d = block_d[b]
         if d == 0:
-            start = end
             continue
 
         s = block_s[b]
+        S0 = S0_at_blocks[b]
+        S1 = S1_at_blocks[b]
+        S2 = S2_at_blocks[b]
+        S3 = S3_at_blocks[b]
+
         S0_inv = 1.0 / S0
         # Risk-set weighted mean covariate vector.
         x_bar = S1 * S0_inv
@@ -734,8 +742,6 @@ def compute_cox_quantities(
         term3 = V.T[:, None, :] * x_bar[None, :, None]  # V[t,s] * x_bar[r]
 
         dI_dbeta += d * (term1 - term2 - term3)
-
-        start = end
 
     # log|I| and I^{-1} for Firth correction
     try:
