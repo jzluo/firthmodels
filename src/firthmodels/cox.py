@@ -661,85 +661,80 @@ def compute_cox_quantities(
     risk = np.exp(eta - c)
 
     # S0, S1, S2, S3 are cumulative sums over the risk set (everyone with time >= t).
-    S0 = 0.0
-    S1 = np.zeros(k, dtype=np.float64)
-    S2 = np.zeros((k, k), dtype=np.float64)
-    S3 = np.zeros((k, k, k), dtype=np.float64)
+    wX = X * risk[:, None]
+    S0_cumsum = np.cumsum(risk)
+    S1_cumsum = np.cumsum(wX, axis=0)
+    S2_cumsum = np.cumsum(wX[:, :, None] * X[:, None, :], axis=0)
 
-    S0_at_blocks = np.zeros(n_blocks, dtype=np.float64)
-    S1_at_blocks = np.zeros((n_blocks, k), dtype=np.float64)
-    S2_at_blocks = np.zeros((n_blocks, k, k), dtype=np.float64)
+    # Index at block boundaries to get risk-set sums at each unique time
+    block_end_indices = block_ends - 1
+    S0_at_blocks = S0_cumsum[block_end_indices]
+    S1_at_blocks = S1_cumsum[block_end_indices]
+    S2_at_blocks = S2_cumsum[block_end_indices]
+
+    # loop 1: accumulate S3 at each block boundary.
+
+    S3 = np.zeros((k, k, k), dtype=np.float64)
     S3_at_blocks = np.zeros((n_blocks, k, k, k), dtype=np.float64)
 
-    # loop 1: Accumulate risk-set sums at each block boundary.
     start = 0
     for b in range(n_blocks):
         end = block_ends[b]
         block_X = X[start:end]
-        block_risk = risk[start:end]
-
-        # update risk-set sums (everyone in the block enters the risk set)
-        S0 += block_risk.sum()
-        weighted_X = block_X * block_risk[:, None]
-        S1 += weighted_X.sum(axis=0)
-        S2 += weighted_X.T @ block_X
+        weighted_X = block_X * risk[start:end, None]
         # S3[r,s,t] = sum_i risk[i] * X[i,r] * X[i,s] * X[i,t]
         S3 += np.tensordot(
             weighted_X, block_X[:, :, None] * block_X[:, None, :], axes=([0], [0])
         )
-
-        # Store cumulative sums at this block boundary
-        S0_at_blocks[b] = S0
-        S1_at_blocks[b] = S1
-        S2_at_blocks[b] = S2
         S3_at_blocks[b] = S3
-
         start = end
 
-    # loop 2: compute likelihood contributions for blocks with events.
-    loglik = 0.0
-    score = np.zeros(k, dtype=np.float64)
-    fisher_info = np.zeros((k, k), dtype=np.float64)
-    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
+    # Filter to event blocks only
+    event_mask = block_d > 0
+    d_events = block_d[event_mask]  # (n_event_blocks,)
+    s_events = block_s[event_mask]  # (n_event_blocks, k)
+    S0_events = S0_at_blocks[event_mask]  # (n_event_blocks,)
+    S1_events = S1_at_blocks[event_mask]  # (n_event_blocks, k)
+    S2_events = S2_at_blocks[event_mask]  # (n_event_blocks, k, k)
+    S3_events = S3_at_blocks[event_mask]  # (n_event_blocks, k, k, k)
+
+    S0_inv = 1.0 / S0_events  # (n_event_blocks,)
+    S0_inv2 = S0_inv * S0_inv
+    # Risk-set weighted mean covariate vector.
+    x_bar = S1_events * S0_inv[:, None]
+
+    # Add c to undo the scaling exp(eta - c) in the risk-set sum.
+    loglik = float(np.sum(s_events @ beta - d_events * (c + np.log(S0_events))))
+
+    score = np.sum(s_events - d_events[:, None] * x_bar, axis=0)
+
+    # Fisher info using the paper's weighted-covariance form.
+    # Section 2: each event time contributes d_j times the weighted covariance of X
+    # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
+    V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
+    fisher_info = np.einsum("b,brt->rt", d_events, V)
+
+    # loop 2: dI/d beta for Firth correction (Section 2 of paper).
     # dI_dbeta[t, r, s] = dI_rs / d beta_t.
+    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
 
-    for b in range(n_blocks):
-        d = block_d[b]
-        if d == 0:
-            continue
+    for i in range(len(d_events)):
+        d = d_events[i]
+        S1_b = S1_events[i]
+        S2_b = S2_events[i]
+        S3_b = S3_events[i]
+        S0_inv_b = S0_inv[i]
+        S0_inv2_b = S0_inv2[i]
+        x_bar_b = x_bar[i]
+        V_b = V[i]
 
-        s = block_s[b]
-        S0 = S0_at_blocks[b]
-        S1 = S1_at_blocks[b]
-        S2 = S2_at_blocks[b]
-        S3 = S3_at_blocks[b]
-
-        S0_inv = 1.0 / S0
-        # Risk-set weighted mean covariate vector.
-        x_bar = S1 * S0_inv
-
-        # Add c to undo the scaling exp(eta - c) in the risk-set sum.
-        loglik += beta @ s - d * (c + np.log(S0))
-
-        score += s - d * x_bar
-
-        # Fisher info using the paper's weighted-covariance form.
-        # Section 2: each event time contributes d_j times the weighted covariance of X
-        # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
-        V = S2 * S0_inv - np.outer(x_bar, x_bar)
-        fisher_info += d * V
-
-        # dI/d beta for Firth correction (Section 2 of paper).
         # We implement the per-block contribution using S0/S1/S2/S3 and V, where
         # V_{rt} = S_{rt}/S0 - S_r S_t/S0^2.
-        S0_inv2 = S0_inv * S0_inv
-        term1 = S3.transpose(2, 0, 1) * S0_inv - (  # S3 is (r,s,t)
-            S1[:, None, None] * S2[None, :, :] * S0_inv2
+        term1 = S3_b.transpose(2, 0, 1) * S0_inv_b - (  # S3 is (r,s,t)
+            S1_b[:, None, None] * S2_b[None, :, :] * S0_inv2_b
         )
-        # term2 = np.einsum("s,rt->trs", S1 * S0_inv, V, optimize=True)
-        term2 = V.T[:, :, None] * x_bar[None, None, :]  # V[t,r] * x_bar[s]
-        # term3 = np.einsum("r,st->trs", S1 * S0_inv, V, optimize=True)
-        term3 = V.T[:, None, :] * x_bar[None, :, None]  # V[t,s] * x_bar[r]
+        term2 = V_b.T[:, :, None] * x_bar_b[None, None, :]  # V[t,r] * x_bar[s]
+        term3 = V_b.T[:, None, :] * x_bar_b[None, :, None]  # V[t,s] * x_bar[r]
 
         dI_dbeta += d * (term1 - term2 - term3)
 
