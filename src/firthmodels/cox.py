@@ -629,6 +629,34 @@ def _validate_survival_y(
     return event, time
 
 
+class _Workspace:
+    """Pre-allocated arrays for compute_cox_quantities"""
+
+    __slots__ = (
+        "wX",
+        "S0_cumsum",
+        "S1_cumsum",
+        "S2_cumsum",
+        "outer_prod",
+        "wXh",
+        "A_cumsum",
+        "B_cumsum",
+        "I_k",
+    )
+
+    def __init__(self, n_samples: int, n_features: int) -> None:
+        n, k = n_samples, n_features
+        self.wX = np.empty((n, k), dtype=np.float64)
+        self.S0_cumsum = np.empty(n, dtype=np.float64)
+        self.S1_cumsum = np.empty((n, k), dtype=np.float64)
+        self.S2_cumsum = np.empty((n, k, k), dtype=np.float64)
+        self.outer_prod = np.empty((n, k, k), dtype=np.float64)
+        self.wXh = np.empty((n, k), dtype=np.float64)
+        self.A_cumsum = np.empty((n, k), dtype=np.float64)
+        self.B_cumsum = np.empty(n, dtype=np.float64)
+        self.I_k = np.eye(k, dtype=np.float64, order="F")
+
+
 def compute_cox_quantities(
     beta: NDArray[np.float64],
     precomputed: _CoxPrecomputed,
