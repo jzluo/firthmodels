@@ -696,20 +696,16 @@ def compute_cox_quantities(
 
     # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
     np.multiply(X, risk[:, None], out=ws.wX)
-    wX = ws.wX
     np.cumsum(risk, out=ws.S0_cumsum)
-    S0_cumsum = ws.S0_cumsum
-    np.cumsum(wX, axis=0, out=ws.S1_cumsum)
-    S1_cumsum = ws.S1_cumsum
-    np.multiply(wX[:, :, None], X[:, None, :], out=ws.outer_prod)
+    np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
+    np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.outer_prod)
     np.cumsum(ws.outer_prod, axis=0, out=ws.S2_cumsum)
-    S2_cumsum = ws.S2_cumsum
 
     # Index at block boundaries to get risk-set sums at each unique time
     block_end_indices = block_ends - 1
-    S0_at_blocks = S0_cumsum[block_end_indices]
-    S1_at_blocks = S1_cumsum[block_end_indices]
-    S2_at_blocks = S2_cumsum[block_end_indices]
+    S0_at_blocks = ws.S0_cumsum[block_end_indices]
+    S1_at_blocks = ws.S1_cumsum[block_end_indices]
+    S2_at_blocks = ws.S2_cumsum[block_end_indices]
 
     # Filter to event blocks only
     event_mask = block_d > 0
@@ -759,16 +755,14 @@ def compute_cox_quantities(
     # Cumulative sums for the contracted S3 term and trace term
     # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
     # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
-    np.multiply(wX, h[:, None], out=ws.wXh)
+    np.multiply(ws.wX, h[:, None], out=ws.wXh)
     np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
-    A_cumsum = ws.A_cumsum
     np.cumsum(risk * h, out=ws.B_cumsum)
-    B_cumsum = ws.B_cumsum
 
     # Index at event block boundaries
     event_block_indices = block_end_indices[event_mask]
-    A_events = A_cumsum[event_block_indices]  # (n_event_blocks, k)
-    B_events = B_cumsum[event_block_indices]  # (n_event_blocks,)
+    A_events = ws.A_cumsum[event_block_indices]  # (n_event_blocks, k)
+    B_events = ws.B_cumsum[event_block_indices]  # (n_event_blocks,)
 
     # term1 contracted with I_inv: A/S0 - B*S1/S0^2
     term1_contrib = (
