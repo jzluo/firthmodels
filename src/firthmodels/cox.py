@@ -687,9 +687,9 @@ def compute_cox_quantities(
     x_bar = S1_events * S0_inv[:, None]
 
     # Add c to undo the scaling exp(eta - c) in the risk-set sum.
-    loglik = float(np.sum(s_events @ beta - d_events * (c + np.log(S0_events))))
+    loglik = float((s_events @ beta - d_events * (c + np.log(S0_events))).sum())
 
-    score = np.sum(s_events - d_events[:, None] * x_bar, axis=0)
+    score = (s_events - d_events[:, None] * x_bar).sum(axis=0)
 
     # Fisher info using the paper's weighted-covariance form.
     # Section 2: each event time contributes d_j times the weighted covariance of X
@@ -744,7 +744,7 @@ def compute_cox_quantities(
 
     # Firth correction: 0.5 * sum over event blocks of d * (term1 - 2*term23)
     firth_per_block = term1_contrib - 2 * term23_contrib
-    firth_correction = 0.5 * np.sum(d_events[:, None] * firth_per_block, axis=0)
+    firth_correction = 0.5 * np.einsum("b,bt->t", d_events, firth_per_block)
     modified_score = score + firth_correction
     loglik = loglik + 0.5 * logdet
 
