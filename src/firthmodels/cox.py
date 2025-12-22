@@ -638,7 +638,6 @@ class _Workspace:
         "S0_cumsum",
         "S1_cumsum",
         "S2_cumsum",
-        "outer_prod",
         "wXh",
         "A_cumsum",
         "B_cumsum",
@@ -651,7 +650,6 @@ class _Workspace:
         self.S0_cumsum = np.empty(n, dtype=np.float64)
         self.S1_cumsum = np.empty((n, k), dtype=np.float64)
         self.S2_cumsum = np.empty((n, k, k), dtype=np.float64)
-        self.outer_prod = np.empty((n, k, k), dtype=np.float64)
         self.wXh = np.empty((n, k), dtype=np.float64)
         self.A_cumsum = np.empty((n, k), dtype=np.float64)
         self.B_cumsum = np.empty(n, dtype=np.float64)
@@ -698,8 +696,8 @@ def compute_cox_quantities(
     np.multiply(X, risk[:, None], out=ws.wX)
     np.cumsum(risk, out=ws.S0_cumsum)
     np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
-    np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.outer_prod)
-    np.cumsum(ws.outer_prod, axis=0, out=ws.S2_cumsum)
+    np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
+    np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
 
     # Index at block boundaries to get risk-set sums at each unique time
     block_end_indices = block_ends - 1
