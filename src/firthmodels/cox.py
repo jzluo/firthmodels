@@ -682,15 +682,22 @@ def compute_cox_quantities(
 
         # update risk-set sums (everyone in the block enters the risk set)
         S0 += block_risk.sum()
-        S1 += block_X.T @ block_risk
-        S2 += (block_X * block_risk[:, None]).T @ block_X
-        S3 += np.einsum(
-            "i,ir,is,it->rst",
-            block_risk,
-            block_X,
-            block_X,
-            block_X,
-            optimize=True,
+        # S1 += block_X.T @ block_risk
+        # S2 += (block_X * block_risk[:, None]).T @ block_X
+        # S3 += np.einsum(
+        #     "i,ir,is,it->rst",
+        #     block_risk,
+        #     block_X,
+        #     block_X,
+        #     block_X,
+        #     optimize=True,
+        # )
+        weighted_X = block_X * block_risk[:, None]  # (n_block, k)
+        S1 += weighted_X.sum(axis=0)
+        S2 += weighted_X.T @ block_X
+        # S3[r,s,t] = sum_i risk[i] * X[i,r] * X[i,s] * X[i,t]
+        S3 += np.tensordot(
+            weighted_X, block_X[:, :, None] * block_X[:, None, :], axes=([0], [0])
         )
 
         d = block_d[b]
