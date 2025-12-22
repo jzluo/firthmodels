@@ -7,6 +7,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
+from scipy.linalg.lapack import dpotrf, dpotrs
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -111,10 +112,11 @@ class FirthCoxPH(BaseEstimator):
 
         # Precompute sorted data and block structure
         precomputed = _CoxPrecomputed.from_data(X, time, event)
+        workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
         # Create closure for newton_raphson
         def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-            return compute_cox_quantities(beta, precomputed)
+            return compute_cox_quantities(beta, precomputed, workspace)
 
         # Run optimizer
         result = newton_raphson(
@@ -142,8 +144,9 @@ class FirthCoxPH(BaseEstimator):
         z = result.beta / self.bse_
         self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
 
-        # need these for LRT
+        # need these for LRT and profile CI
         self._precomputed = precomputed
+        self._workspace = workspace
 
         self.lrt_pvalues_ = np.full(len(result.beta), np.nan)
         self.lrt_bse_ = np.full(len(result.beta), np.nan)
@@ -215,10 +218,7 @@ class FirthCoxPH(BaseEstimator):
 
         def compute_quantities_full(beta):
             return compute_cox_quantities(
-                precomputed=self._precomputed,
-                beta=beta,
-                # sample_weight=sample_weight,
-                # offset=offset,
+                beta=beta, precomputed=self._precomputed, workspace=self._workspace
             )
 
         beta_hat_full = self.coef_
@@ -347,7 +347,9 @@ class FirthCoxPH(BaseEstimator):
             l_star = self.loglik_ - chi2_crit / 2
 
             def compute_quantities_full(beta: NDArray[np.float64]):
-                return compute_cox_quantities(beta=beta, precomputed=self._precomputed)
+                return compute_cox_quantities(
+                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                )
 
             theta_hat = self.coef_.copy()
 
@@ -628,9 +630,36 @@ def _validate_survival_y(
     return event, time
 
 
+class _Workspace:
+    """Pre-allocated arrays for compute_cox_quantities"""
+
+    __slots__ = (
+        "wX",
+        "S0_cumsum",
+        "S1_cumsum",
+        "S2_cumsum",
+        "wXh",
+        "A_cumsum",
+        "B_cumsum",
+        "eye_k",
+    )
+
+    def __init__(self, n_samples: int, n_features: int) -> None:
+        n, k = n_samples, n_features
+        self.wX = np.empty((n, k), dtype=np.float64)
+        self.S0_cumsum = np.empty(n, dtype=np.float64)
+        self.S1_cumsum = np.empty((n, k), dtype=np.float64)
+        self.S2_cumsum = np.empty((n, k, k), dtype=np.float64)
+        self.wXh = np.empty((n, k), dtype=np.float64)
+        self.A_cumsum = np.empty((n, k), dtype=np.float64)
+        self.B_cumsum = np.empty(n, dtype=np.float64)
+        self.eye_k = np.eye(k, dtype=np.float64, order="F")
+
+
 def compute_cox_quantities(
     beta: NDArray[np.float64],
     precomputed: _CoxPrecomputed,
+    workspace: _Workspace,
 ) -> CoxQuantities:
     """
     Compute all quantities needed for one Newton-Raphson iteration.
@@ -641,6 +670,8 @@ def compute_cox_quantities(
         Current coefficient estimates.
     precomputed : _CoxPrecomputed
         Precomputed data from _CoxPrecomputed.from_data().
+    workspace : _Workspace
+        Pre-allocated arrays to avoid repeated memory allocation.
 
     Returns
     -------
@@ -651,8 +682,8 @@ def compute_cox_quantities(
     block_ends = precomputed.block_ends
     block_d = precomputed.block_d
     block_s = precomputed.block_s
-    n_blocks = precomputed.n_blocks
     k = precomputed.n_features
+    ws = workspace
 
     # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
     # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
@@ -660,90 +691,90 @@ def compute_cox_quantities(
     c = np.max(eta)
     risk = np.exp(eta - c)
 
-    # Initialize (scaled) risk-set sums computed with risk = exp(eta - c).
-    S0 = 0.0
-    S1 = np.zeros(k, dtype=np.float64)
-    S2 = np.zeros((k, k), dtype=np.float64)
-    S3 = np.zeros((k, k, k), dtype=np.float64)
+    # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
+    np.multiply(X, risk[:, None], out=ws.wX)
+    np.cumsum(risk, out=ws.S0_cumsum)
+    np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
+    np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
+    np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
 
-    loglik = 0.0
-    score = np.zeros(k, dtype=np.float64)
-    fisher_info = np.zeros((k, k), dtype=np.float64)
-    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
-    # dI_dbeta[t, r, s] = dI_rs / d beta_t.
+    # Index at block boundaries to get risk-set sums at each unique time
+    block_end_indices = block_ends - 1
+    S0_at_blocks = ws.S0_cumsum[block_end_indices]
+    S1_at_blocks = ws.S1_cumsum[block_end_indices]
+    S2_at_blocks = ws.S2_cumsum[block_end_indices]
 
-    # Walk blocks in descending time order
-    start = 0
-    for b in range(n_blocks):
-        end = block_ends[b]
+    # Filter to event blocks only
+    event_mask = block_d > 0
+    d_events = block_d[event_mask]  # (n_event_blocks,)
+    s_events = block_s[event_mask]  # (n_event_blocks, k)
+    S0_events = S0_at_blocks[event_mask]  # (n_event_blocks,)
+    S1_events = S1_at_blocks[event_mask]  # (n_event_blocks, k)
+    S2_events = S2_at_blocks[event_mask]  # (n_event_blocks, k, k)
 
-        block_X = X[start:end]
-        block_risk = risk[start:end]
+    S0_inv = 1.0 / S0_events  # (n_event_blocks,)
+    S0_inv2 = S0_inv * S0_inv
+    # Risk-set weighted mean covariate vector.
+    x_bar = S1_events * S0_inv[:, None]
 
-        # update risk-set sums (everyone in the block enters the risk set)
-        S0 += block_risk.sum()
-        S1 += block_X.T @ block_risk
-        S2 += (block_X * block_risk[:, None]).T @ block_X
-        S3 += np.einsum(
-            "i,ir,is,it->rst",
-            block_risk,
-            block_X,
-            block_X,
-            block_X,
-            optimize=True,
-        )
+    # Add c to undo the scaling exp(eta - c) in the risk-set sum.
+    loglik = float((s_events @ beta - d_events * (c + np.log(S0_events))).sum())
 
-        d = block_d[b]
-        if d == 0:
-            start = end
-            continue
+    score = (s_events - d_events[:, None] * x_bar).sum(axis=0)
 
-        s = block_s[b]
-        S0_inv = 1.0 / S0
-        # Risk-set weighted mean covariate vector.
-        x_bar = S1 * S0_inv
+    # Fisher info using the paper's weighted-covariance form.
+    # Section 2: each event time contributes d_j times the weighted covariance of X
+    # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
+    V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
+    fisher_info = np.einsum("b,brt->rt", d_events, V)
 
-        # Add c to undo the scaling exp(eta - c) in the risk-set sum.
-        loglik += beta @ s - d * (c + np.log(S0))
-
-        score += s - d * x_bar
-
-        # Fisher info using the paper's weighted-covariance form.
-        # Section 2: each event time contributes d_j times the weighted covariance of X
-        # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
-        V = S2 * S0_inv - np.outer(x_bar, x_bar)
-        fisher_info += d * V
-
-        # dI/d beta for Firth correction (Section 2 of paper).
-        # We implement the per-block contribution using S0/S1/S2/S3 and V, where
-        # V_{rt} = S_{rt}/S0 - S_r S_t/S0^2.
-        S0_inv2 = S0_inv * S0_inv
-        term1 = S3.transpose(2, 0, 1) * S0_inv - (  # S3 is (r,s,t)
-            np.einsum("rs,t->trs", S2, S1, optimize=True) * S0_inv2
-        )
-        term2 = np.einsum("s,rt->trs", S1 * S0_inv, V, optimize=True)
-        term3 = np.einsum("r,st->trs", S1 * S0_inv, V, optimize=True)
-        dI_dbeta += d * (term1 - term2 - term3)
-
-        start = end
-
-    # log|I| and I^{-1} for Firth correction
     try:
-        cho = scipy.linalg.cho_factor(fisher_info, lower=True, check_finite=False)
-        logdet = 2.0 * np.sum(np.log(np.diag(cho[0])))
-        inv_fisher_info = scipy.linalg.cho_solve(
-            cho, np.eye(k, dtype=np.float64), check_finite=False
-        )
+        L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrf failed")
+
+        logdet = 2.0 * np.log(L.diagonal()).sum()
+
+        inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
             logdet = -np.inf
         inv_fisher_info = np.linalg.pinv(fisher_info)
 
-    # Firth correction: a_t = 0.5 * trace(I^{-1} * dI/d beta_t).
-    firth_correction = 0.5 * np.einsum(
-        "rs,trs->t", inv_fisher_info, dI_dbeta, optimize=True
+    # avoid O(n k^3) S3 tensor by swapping the summation order:
+    # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
+    # where h[i] = X[i] @ I_inv @ X[i] is the hat matrix diagonal.
+    XI = X @ inv_fisher_info
+    h = np.einsum("ij,ij->i", XI, X)
+
+    # Cumulative sums for the contracted S3 term and trace term
+    # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
+    # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
+    np.multiply(ws.wX, h[:, None], out=ws.wXh)
+    np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
+    np.cumsum(risk * h, out=ws.B_cumsum)
+
+    # Index at event block boundaries
+    event_block_indices = block_end_indices[event_mask]
+    A_events = ws.A_cumsum[event_block_indices]  # (n_event_blocks, k)
+    B_events = ws.B_cumsum[event_block_indices]  # (n_event_blocks,)
+
+    # term1 contracted with I_inv: A/S0 - B*S1/S0^2
+    term1_contrib = (
+        A_events * S0_inv[:, None] - B_events[:, None] * S1_events * S0_inv2[:, None]
     )
+
+    # term2 and term3 contracted with I_inv give the same result (symmetry):
+    # sum_{r,s} I_inv[r,s] * x_bar[s] * V[r,t] = sum_r V[r,t] * (I_inv @ x_bar)[r]
+    Ix = x_bar @ inv_fisher_info  # (n_event_blocks, k)
+    term23_contrib = np.einsum("brt,br->bt", V, Ix)
+
+    # Firth correction: 0.5 * sum over event blocks of d * (term1 - 2*term23)
+    firth_per_block = term1_contrib - 2 * term23_contrib
+    firth_correction = 0.5 * np.einsum("b,bt->t", d_events, firth_per_block)
     modified_score = score + firth_correction
     loglik = loglik + 0.5 * logdet
 

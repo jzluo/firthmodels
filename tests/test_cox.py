@@ -6,6 +6,7 @@ from firthmodels.cox import (
     _concordance_index,
     _CoxPrecomputed,
     _validate_survival_y,
+    _Workspace,
     compute_cox_quantities,
 )
 
@@ -133,7 +134,8 @@ class TestFirthCoxPH:
         # Absolute penalized log-likelihoods differ with coxphf by an
         # additive constant. Compare likelihood ratios instead.
         pre = _CoxPrecomputed.from_data(X, time, event)
-        null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre).loglik
+        ws = _Workspace(pre.n_samples, pre.n_features)
+        null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre, ws).loglik
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
         np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
 
