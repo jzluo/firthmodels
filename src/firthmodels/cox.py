@@ -661,7 +661,7 @@ def compute_cox_quantities(
     c = np.max(eta)
     risk = np.exp(eta - c)
 
-    # S0, S1, S2, S3 are cumulative sums over the risk set (everyone with time >= t).
+    # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
     wX = X * risk[:, None]
     S0_cumsum = np.cumsum(risk)
     S1_cumsum = np.cumsum(wX, axis=0)
@@ -673,23 +673,6 @@ def compute_cox_quantities(
     S1_at_blocks = S1_cumsum[block_end_indices]
     S2_at_blocks = S2_cumsum[block_end_indices]
 
-    # loop 1: accumulate S3 at each block boundary.
-
-    S3 = np.zeros((k, k, k), dtype=np.float64)
-    S3_at_blocks = np.zeros((n_blocks, k, k, k), dtype=np.float64)
-
-    start = 0
-    for b in range(n_blocks):
-        end = block_ends[b]
-        block_X = X[start:end]
-        weighted_X = block_X * risk[start:end, None]
-        # S3[r,s,t] = sum_i risk[i] * X[i,r] * X[i,s] * X[i,t]
-        S3 += np.tensordot(
-            weighted_X, block_X[:, :, None] * block_X[:, None, :], axes=([0], [0])
-        )
-        S3_at_blocks[b] = S3
-        start = end
-
     # Filter to event blocks only
     event_mask = block_d > 0
     d_events = block_d[event_mask]  # (n_event_blocks,)
@@ -697,7 +680,6 @@ def compute_cox_quantities(
     S0_events = S0_at_blocks[event_mask]  # (n_event_blocks,)
     S1_events = S1_at_blocks[event_mask]  # (n_event_blocks, k)
     S2_events = S2_at_blocks[event_mask]  # (n_event_blocks, k, k)
-    S3_events = S3_at_blocks[event_mask]  # (n_event_blocks, k, k, k)
 
     S0_inv = 1.0 / S0_events  # (n_event_blocks,)
     S0_inv2 = S0_inv * S0_inv
@@ -715,37 +697,11 @@ def compute_cox_quantities(
     V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
     fisher_info = np.einsum("b,brt->rt", d_events, V)
 
-    # loop 2: dI/d beta for Firth correction (Section 2 of paper).
-    # dI_dbeta[t, r, s] = dI_rs / d beta_t.
-    dI_dbeta = np.zeros((k, k, k), dtype=np.float64)
-
-    for i in range(len(d_events)):
-        d = d_events[i]
-        S1_b = S1_events[i]
-        S2_b = S2_events[i]
-        S3_b = S3_events[i]
-        S0_inv_b = S0_inv[i]
-        S0_inv2_b = S0_inv2[i]
-        x_bar_b = x_bar[i]
-        V_b = V[i]
-
-        # We implement the per-block contribution using S0/S1/S2/S3 and V, where
-        # V_{rt} = S_{rt}/S0 - S_r S_t/S0^2.
-        term1 = S3_b.transpose(2, 0, 1) * S0_inv_b - (  # S3 is (r,s,t)
-            S1_b[:, None, None] * S2_b[None, :, :] * S0_inv2_b
-        )
-        term2 = V_b.T[:, :, None] * x_bar_b[None, None, :]  # V[t,r] * x_bar[s]
-        term3 = V_b.T[:, None, :] * x_bar_b[None, :, None]  # V[t,s] * x_bar[r]
-
-        dI_dbeta += d * (term1 - term2 - term3)
-
-    # log|I| and I^{-1} for Firth correction
     try:
         L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrf failed")
 
-        # logdet = 2.0 * np.sum(np.log(np.diag(L)))
         logdet = 2.0 * np.log(L.diagonal()).sum()
 
         inv_fisher_info, info = dpotrs(
@@ -759,8 +715,36 @@ def compute_cox_quantities(
             logdet = -np.inf
         inv_fisher_info = np.linalg.pinv(fisher_info)
 
-    # Firth correction: a_t = 0.5 * trace(I^{-1} * dI/d beta_t).
-    firth_correction = 0.5 * dI_dbeta.reshape(k, -1) @ inv_fisher_info.ravel()
+    # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
+    # where h[i] = X[i] @ I_inv @ X[i] is the hat matrix diagonal.
+    XI = X @ inv_fisher_info
+    h = np.einsum("ij,ij->i", XI, X)
+
+    # Cumulative sums for the contracted S3 term and trace term
+    # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
+    # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
+    wXh = wX * h[:, None]
+    A_cumsum = np.cumsum(wXh, axis=0)
+    B_cumsum = np.cumsum(risk * h)
+
+    # Index at event block boundaries
+    event_block_indices = block_end_indices[event_mask]
+    A_events = A_cumsum[event_block_indices]  # (n_event_blocks, k)
+    B_events = B_cumsum[event_block_indices]  # (n_event_blocks,)
+
+    # term1 contracted with I_inv: A/S0 - B*S1/S0^2
+    term1_contrib = (
+        A_events * S0_inv[:, None] - B_events[:, None] * S1_events * S0_inv2[:, None]
+    )
+
+    # term2 and term3 contracted with I_inv give the same result (symmetry):
+    # sum_{r,s} I_inv[r,s] * x_bar[s] * V[r,t] = sum_r V[r,t] * (I_inv @ x_bar)[r]
+    Ix = x_bar @ inv_fisher_info  # (n_event_blocks, k)
+    term23_contrib = np.einsum("brt,br->bt", V, Ix)
+
+    # Firth correction: 0.5 * sum over event blocks of d * (term1 - 2*term23)
+    firth_per_block = term1_contrib - 2 * term23_contrib
+    firth_correction = 0.5 * np.sum(d_events[:, None] * firth_per_block, axis=0)
     modified_score = score + firth_correction
     loglik = loglik + 0.5 * logdet
 
