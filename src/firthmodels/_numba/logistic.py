@@ -463,7 +463,12 @@ def profile_ci_bound_logistic(
             for j in range(k - 1):
                 jj = other_idx[j]
                 D0_ww[i, j] = D0[ii, jj]
-        dw_db = -np.linalg.solve(D0_ww, D0_bw)
+        sign, logdet = np.linalg.slogdet(D0_ww)
+        if sign != 0 and np.isfinite(logdet):
+            dw_db = -np.linalg.solve(D0_ww, D0_bw)
+        else:
+            dw_db = -np.linalg.lstsq(D0_ww, D0_bw)[0]
+
         d2l_db2 = D0[idx, idx]
         for i in range(k - 1):
             d2l_db2 += D0_bw[i] * dw_db[i]
