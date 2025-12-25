@@ -111,7 +111,7 @@ class TestFirthLogisticRegressionNumba:
         model = FirthLogisticRegression(backend="numba")
         model.fit(X, y)
         model.lrt()
-        # ci = model.conf_int(alpha=0.05, method="pl")
+        ci = model.conf_int(alpha=0.05, method="pl")
 
         # coefficients
         expected_intercept = -0.4434562830
@@ -145,15 +145,15 @@ class TestFirthLogisticRegressionNumba:
         np.testing.assert_allclose(model.lrt_bse_, expected_lrt_bse, rtol=1e-4)
 
         # profile CI
-        # expected_lower = np.array(
-        #     [1.3901042899, 0.1602568036, -1.6677883758, 0.0893054012, -1.16089382506]
-        # )
-        # expected_upper = np.array(
-        #     [8.5876062114, 1.2568999211, -0.1135186948, 0.6572681313, 0.2295139209]
-        # )
+        expected_lower = np.array(
+            [1.3901042899, 0.1602568036, -1.6677883758, 0.0893054012, -1.16089382506]
+        )
+        expected_upper = np.array(
+            [8.5876062114, 1.2568999211, -0.1135186948, 0.6572681313, 0.2295139209]
+        )
 
-        # np.testing.assert_allclose(ci[:, 0], expected_lower, rtol=1e-4)
-        # np.testing.assert_allclose(ci[:, 1], expected_upper, rtol=1e-4)
+        np.testing.assert_allclose(ci[:, 0], expected_lower, rtol=1e-4)
+        np.testing.assert_allclose(ci[:, 1], expected_upper, rtol=1e-4)
 
     def test_numba_fit_intercept_false(self, separation_data):
         """Fits without intercept."""
