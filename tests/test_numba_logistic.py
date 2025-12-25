@@ -110,7 +110,7 @@ class TestFirthLogisticRegressionNumba:
         X, y = separation_data
         model = FirthLogisticRegression(backend="numba")
         model.fit(X, y)
-        # model.lrt()
+        model.lrt()
         # ci = model.conf_int(alpha=0.05, method="pl")
 
         # coefficients
@@ -129,20 +129,20 @@ class TestFirthLogisticRegressionNumba:
         np.testing.assert_allclose(model.bse_, expected_wald_bse, rtol=1e-4)
 
         # LRT
-        # expected_lrt_pvalues = np.array(
-        #     [
-        #         0.0002084147149,
-        #         0.0093173148959,
-        #         0.0236385713206,
-        #         0.0055887969164,
-        #         0.1997147194,
-        #     ]
-        # )
-        # expected_lrt_bse = np.array(
-        #     [0.9862809793, 0.2599729631, 0.3814979166, 0.1221874315, 0.3458113448]
-        # )
-        # np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-4)
-        # np.testing.assert_allclose(model.lrt_bse_, expected_lrt_bse, rtol=1e-4)
+        expected_lrt_pvalues = np.array(
+            [
+                0.0002084147149,
+                0.0093173148959,
+                0.0236385713206,
+                0.0055887969164,
+                0.1997147194,
+            ]
+        )
+        expected_lrt_bse = np.array(
+            [0.9862809793, 0.2599729631, 0.3814979166, 0.1221874315, 0.3458113448]
+        )
+        np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-4)
+        np.testing.assert_allclose(model.lrt_bse_, expected_lrt_bse, rtol=1e-4)
 
         # profile CI
         # expected_lower = np.array(

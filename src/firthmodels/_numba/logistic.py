@@ -270,3 +270,141 @@ def newton_raphson_logistic(
                 return beta, loglik, fisher_info_aug, iteration, False
 
     return beta, loglik, fisher_info_aug, iteration, False
+
+
+@njit(fastmath=True, cache=True)
+def constrained_lrt_1df_logistic(
+    X: NDArray[np.float64],
+    y: NDArray[np.float64],
+    sample_weight: NDArray[np.float64],
+    offset: NDArray[np.float64],
+    idx: int,
+    max_iter: int,
+    max_step: float,
+    max_halfstep: int,
+    gtol: float,
+    xtol: float,
+    workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
+) -> tuple[float, int, bool]:  # loglik, iteration, converged
+    (
+        eta,
+        p,
+        w,
+        sqrt_w,
+        XtW,
+        fisher_info,  # use this as a scratch array
+        solved,
+        h,
+        w_aug,
+        sqrt_w_aug,
+        XtW_aug,
+        fisher_info_aug,
+        residual,
+        modified_score,
+    ) = workspace
+
+    n, k = X.shape
+    free_k = k - 1
+    beta = np.zeros(k, dtype=np.float64)
+    beta_new = np.zeros(k, dtype=np.float64)
+    score_free = np.empty(free_k, dtype=np.float64)
+    score_col = _alloc_f_order(free_k, 1)
+    delta = np.empty(free_k, dtype=np.float64)
+    fisher_free = _alloc_f_order(free_k, free_k)
+
+    free_idx = np.empty(free_k, dtype=np.intp)
+    pos = 0
+    for j in range(k):
+        if j != idx:
+            free_idx[pos] = j
+            pos += 1
+
+    loglik, info = compute_logistic_quantities(
+        X, y, beta, sample_weight, offset, workspace
+    )
+    if info != 0:
+        return loglik, 0, False
+
+    for iteration in range(1, max_iter + 1):
+        for i in range(free_k):
+            score_free[i] = modified_score[free_idx[i]]
+
+        for i in range(free_k):
+            ii = free_idx[i]
+            for j in range(free_k):
+                jj = free_idx[j]
+                fisher_free[i, j] = fisher_info_aug[ii, jj]
+
+        info = dpotrf(fisher_free)
+        if info != 0:
+            # Recompute fisher_free since dpotrf overwrote it
+            for i in range(free_k):
+                ii = free_idx[i]
+                for j in range(free_k):
+                    jj = free_idx[j]
+                    fisher_free[i, j] = fisher_info_aug[ii, jj]
+            delta[:] = np.linalg.lstsq(fisher_free, score_free)[0]
+        else:
+            for i in range(free_k):
+                score_col[i, 0] = score_free[i]
+
+            info = dpotrs(fisher_free, score_col)
+            if info != 0:
+                return loglik, iteration, False
+
+            for i in range(free_k):
+                delta[i] = score_col[i, 0]
+
+        max_score = max_abs(score_free)
+        max_delta = max_abs(delta)
+        if max_score < gtol and max_delta < xtol:
+            return loglik, iteration, True
+
+        if max_delta > max_step:
+            scale = max_step / max_delta
+            for i in range(free_k):
+                delta[i] *= scale
+
+        for i in range(k):
+            beta_new[i] = beta[i]
+        for i in range(free_k):
+            beta_new[free_idx[i]] = beta[free_idx[i]] + delta[i]
+        beta_new[idx] = 0.0
+
+        loglik_new, info = compute_logistic_quantities(
+            X, y, beta_new, sample_weight, offset, workspace
+        )
+        if info != 0:
+            return loglik, iteration, False
+
+        if loglik_new >= loglik or max_halfstep == 0:
+            for i in range(k):
+                beta[i] = beta_new[i]
+            loglik = loglik_new
+        else:
+            # Step-halving until loglik improves
+            step_factor = 0.5
+            accepted = False
+            for _ in range(max_halfstep):
+                for i in range(free_k):
+                    beta_new[free_idx[i]] = beta[free_idx[i]] + step_factor * delta[i]
+                beta_new[idx] = 0.0
+
+                loglik_new, info = compute_logistic_quantities(
+                    X, y, beta_new, sample_weight, offset, workspace
+                )
+                if info != 0:
+                    return loglik, iteration, False
+
+                if loglik_new >= loglik:
+                    for i in range(k):
+                        beta[i] = beta_new[i]
+                    loglik = loglik_new
+                    accepted = True
+                    break
+                step_factor *= 0.5
+
+            if not accepted:  # step-halving failed, return early
+                return loglik, iteration, False
+
+    return loglik, max_iter, False
