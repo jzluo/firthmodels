@@ -11,10 +11,7 @@ if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         compute_logistic_quantities as compute_logistic_quantities_numba,
     )
-    from firthmodels._numba.logistic import (
-        expit,
-        log1pexp,
-    )
+    from firthmodels._numba.logistic import expit, log1pexp, max_abs
 
 
 @pytest.mark.parametrize(
@@ -29,6 +26,12 @@ def test_expit(x):
 )
 def test_log1pexp(x):
     assert log1pexp(x) == pytest.approx(np.logaddexp(0, x), rel=1e-14)
+
+
+def test_max_abs():
+    rng = np.random.default_rng(0)
+    arr = rng.standard_normal(100)
+    np.testing.assert_allclose(max_abs(arr), np.abs(arr).max())
 
 
 def test_compute_logistic_quantities():
