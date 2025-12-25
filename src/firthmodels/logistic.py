@@ -18,6 +18,7 @@ from sklearn.utils.validation import (
     validate_data,
 )
 
+from firthmodels import NUMBA_AVAILABLE
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
@@ -116,6 +117,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         gtol: float = 1e-4,
         xtol: float = 1e-4,
         fit_intercept: bool = True,
+        backend: Literal["auto", "numba", "numpy"] = "auto",
     ) -> None:
         self.solver = solver
         self.max_iter = max_iter
@@ -124,12 +126,27 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.gtol = gtol
         self.xtol = xtol
         self.fit_intercept = fit_intercept
+        self.backend = backend
 
     def __sklearn_tags__(self) -> Tags:
         tags = super().__sklearn_tags__()
         tags.classifier_tags = ClassifierTags()
         tags.classifier_tags.multi_class = False
         return tags
+
+    def _resolve_backend(self) -> Literal["numba", "numpy"]:
+        if self.backend == "auto":
+            return "numba" if NUMBA_AVAILABLE else "numpy"
+        if self.backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
+            return "numba"
+        else:
+            if self.backend not in ["auto", "numba", "numpy"]:
+                raise ValueError(
+                    f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
+                )
+            return "numpy"
 
     def fit(
         self,
