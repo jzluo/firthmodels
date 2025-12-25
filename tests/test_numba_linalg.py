@@ -4,7 +4,15 @@ import pytest
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.linalg import dgemm, dgetrf, dgetri, dpotrf, dpotri, dsyrk
+    from firthmodels._numba.linalg import (
+        dgemm,
+        dgetrf,
+        dgetri,
+        dpotrf,
+        dpotri,
+        dpotrs,
+        dsyrk,
+    )
 
 
 class TestBLAS:
@@ -35,11 +43,21 @@ class TestLAPACK:
         M = M @ M.T + np.eye(4)  # positive definite
         A = np.asfortranarray(M.copy())
 
+        # dpotrf: A -> L
         info = dpotrf(A)
         assert info == 0
         L = np.tril(A)
         np.testing.assert_allclose(L @ L.T, M, rtol=1e-14)
 
+        # dpotrs: solve M @ x = b using L
+        b = rng.standard_normal((4, 1))
+        b = np.asfortranarray(b.copy())
+        b_orig = b.copy()
+        info = dpotrs(A, b)  # A is still L
+        assert info == 0
+        np.testing.assert_allclose(M @ b, b_orig, rtol=1e-14)
+
+        # dpotri: L -> inv(M)
         info = dpotri(A)
         assert info == 0
         A = np.tril(A) + np.tril(A, -1).T

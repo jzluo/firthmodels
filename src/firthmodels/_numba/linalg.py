@@ -3,6 +3,14 @@ import ctypes
 import numpy as np
 from numba import njit
 from numba.extending import get_cython_function_address
+from numpy.typing import NDArray
+
+
+@njit(inline="always")
+def _alloc_f_order(rows: int, cols: int) -> NDArray[np.float64]:
+    temp = np.empty((cols, rows), dtype=np.float64)
+    return temp.T
+
 
 # https://numba.discourse.group/t/extending-lapack-functions-into-numba/1394/4
 
@@ -18,6 +26,7 @@ _dsyrk_addr = get_cython_function_address("scipy.linalg.cython_blas", "dsyrk")
 _dgemm_addr = get_cython_function_address("scipy.linalg.cython_blas", "dgemm")
 _dpotrf_addr = get_cython_function_address("scipy.linalg.cython_lapack", "dpotrf")
 _dpotri_addr = get_cython_function_address("scipy.linalg.cython_lapack", "dpotri")
+_dpotrs_addr = get_cython_function_address("scipy.linalg.cython_lapack", "dpotrs")
 _dgetrf_addr = get_cython_function_address("scipy.linalg.cython_lapack", "dgetrf")
 _dgetri_addr = get_cython_function_address("scipy.linalg.cython_lapack", "dgetri")
 
@@ -73,6 +82,19 @@ _dpotri_functype = ctypes.CFUNCTYPE(
     _ptr_int,  # info
 )
 _dpotri = _dpotri_functype(_dpotri_addr)
+
+_dpotrs_functype = ctypes.CFUNCTYPE(
+    None,
+    _ptr_int,  # uplo
+    _ptr_int,  # n
+    _ptr_int,  # nrhs
+    _ptr_dbl,  # a
+    _ptr_int,  # lda
+    _ptr_dbl,  # b
+    _ptr_int,  # ldb
+    _ptr_int,  # info
+)
+_dpotrs = _dpotrs_functype(_dpotrs_addr)
 
 _dgetrf_functype = ctypes.CFUNCTYPE(
     None,
@@ -191,6 +213,30 @@ def dpotri(L: np.ndarray) -> int:
         n_arr.ctypes,
         L.ctypes,
         lda.ctypes,
+        info.ctypes,
+    )
+    return int(info[0])
+
+
+@njit
+def dpotrs(L: np.ndarray, B: np.ndarray) -> int:
+    n = L.shape[0]
+    nrhs = B.shape[1]
+    uplo = np.array([ord("L")], dtype=np.int64)
+    n_arr = np.array([n], dtype=np.int64)
+    nrhs_arr = np.array([nrhs], dtype=np.int64)
+    lda = np.array([n], dtype=np.int64)
+    ldb = np.array([n], dtype=np.int64)
+    info = np.array([0], dtype=np.int64)
+
+    _dpotrs(
+        uplo.ctypes,
+        n_arr.ctypes,
+        nrhs_arr.ctypes,
+        L.ctypes,
+        lda.ctypes,
+        B.ctypes,
+        ldb.ctypes,
         info.ctypes,
     )
     return int(info[0])
