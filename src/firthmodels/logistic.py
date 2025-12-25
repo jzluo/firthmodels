@@ -19,10 +19,14 @@ from sklearn.utils.validation import (
 )
 
 from firthmodels import NUMBA_AVAILABLE
+
+if NUMBA_AVAILABLE:
+    from firthmodels._numba.logistic import newton_raphson_logistic
+
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import resolve_feature_indices
+from firthmodels._utils import FirthResult, resolve_feature_indices
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -206,25 +210,47 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         # pre-allocate workspace arrays to reduce allocations
         workspace = _Workspace(n=X.shape[0], k=n_features)
 
-        def compute_quantities(beta):
-            return compute_logistic_quantities(
+        if self._resolve_backend() == "numba":
+            beta, loglik, fisher_info, n_iter, converged = newton_raphson_logistic(
                 X=X,
                 y=y,
-                beta=beta,
                 sample_weight=sample_weight,
                 offset=offset,
-                workspace=workspace,
+                workspace=workspace.numba_buffers(),
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
             )
+            result = FirthResult(
+                beta=beta,
+                loglik=loglik,
+                fisher_info=fisher_info,
+                n_iter=n_iter,
+                converged=converged,
+            )
+        else:
 
-        result = newton_raphson(
-            compute_quantities=compute_quantities,
-            n_features=n_features,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            def compute_quantities(beta):
+                return compute_logistic_quantities(
+                    X=X,
+                    y=y,
+                    beta=beta,
+                    sample_weight=sample_weight,
+                    offset=offset,
+                    workspace=workspace,
+                )
+
+            result = newton_raphson(
+                compute_quantities=compute_quantities,
+                n_features=n_features,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
 
         # === Extract coefficients ===
         if self.fit_intercept:
