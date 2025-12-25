@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from scipy.special import expit
+from scipy.special import expit as scipy_expit
 
 from firthmodels import NUMBA_AVAILABLE, FirthLogisticRegression
 from firthmodels._solvers import newton_raphson
@@ -24,7 +24,7 @@ if NUMBA_AVAILABLE:
     "x", [-np.inf, -710, -100, -10, -5, -1, 0, 1, 5, 10, 100, 710, np.inf]
 )
 def test_expit(x):
-    assert expit(x) == pytest.approx(expit(x), rel=1e-14, abs=1e-300)
+    assert expit(x) == pytest.approx(scipy_expit(x), rel=1e-14, abs=1e-300)
 
 
 @pytest.mark.parametrize(
