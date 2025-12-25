@@ -1,3 +1,4 @@
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Literal, Self, Sequence, cast
@@ -21,9 +22,12 @@ from sklearn.utils.validation import (
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.logistic import newton_raphson_logistic
+    from firthmodels._numba.logistic import (
+        constrained_lrt_1df_logistic,
+        newton_raphson_logistic,
+    )
 
-from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._lrt import LRTResult, constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
 from firthmodels._utils import FirthResult, resolve_feature_indices
@@ -293,6 +297,116 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self._workspace = workspace
         return self
 
+    def lrt(
+        self,
+        features: int | str | Sequence[int | str] | None = None,
+    ) -> Self:
+        """
+        Compute penalized likelihood ratio test p-values.
+        Standard errors are also back-corrected using the effect size estimate and the
+        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
+        by 1/SE².
+
+        Parameters
+        ----------
+        features : int, str, sequence of int, sequence of str, or None, default=None
+            Features to test. If None, test all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+
+        Returns
+        -------
+        self : FirthLogisticRegression
+
+        Examples
+        --------
+        >>> model.fit(X, y).lrt()  # compute LR for all features
+        >>> model.lrt_pvalues_
+        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
+        >>> model.lrt_bse_
+        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
+        >>> model.fit(X, y).lrt(0)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan,        nan,        nan])
+        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan, 0.02363857,        nan])
+        """
+        check_is_fitted(self)
+        indices = self._resolve_feature_indices(features)
+
+        # compute LRT
+        for idx in indices:
+            if np.isnan(self.lrt_pvalues_[idx]):
+                self._compute_single_lrt(idx)
+        return self
+
+    def _compute_single_lrt(self, idx: int) -> None:
+        """
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
+        back-corrected standard error.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the coefficient to test. Use len(coef_) for the intercept.
+        """
+        X, y, sample_weight, offset = self._fit_data
+
+        if self.fit_intercept:
+            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            beta_hat_full = self.coef_
+
+        if self._resolve_backend() == "numba":
+            loglik_constrained, n_iter, converged = constrained_lrt_1df_logistic(
+                X=X,
+                y=y,
+                sample_weight=sample_weight,
+                offset=offset,
+                idx=idx,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=self._workspace.numba_buffers(),
+            )
+            chi2 = 2 * (self.loglik_ - loglik_constrained)
+            pvalue = scipy.stats.chi2.sf(chi2, df=1)
+            #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
+            bse = abs(beta_hat_full[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
+            result = LRTResult(chi2=chi2, pvalue=pvalue, bse_backcorrected=bse)
+        else:
+
+            def compute_quantities_full(beta):
+                return compute_logistic_quantities(
+                    X=X,
+                    y=y,
+                    beta=beta,
+                    sample_weight=sample_weight,
+                    offset=offset,
+                    workspace=self._workspace,
+                )
+
+            result = constrained_lrt_1df(
+                idx=idx,
+                beta_hat_full=beta_hat_full,
+                loglik_full=self.loglik_,
+                compute_quantities_full=compute_quantities_full,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
+
+        self.lrt_pvalues_[idx] = result.pvalue
+        self.lrt_bse_[idx] = result.bse_backcorrected
+
     def conf_int(
         self,
         alpha: float = 0.05,
@@ -424,95 +538,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         else:
             raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
-
-    def lrt(
-        self,
-        features: int | str | Sequence[int | str] | None = None,
-    ) -> Self:
-        """
-        Compute penalized likelihood ratio test p-values.
-        Standard errors are also back-corrected using the effect size estimate and the
-        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
-        by 1/SE².
-
-        Parameters
-        ----------
-        features : int, str, sequence of int, sequence of str, or None, default=None
-            Features to test. If None, test all features.
-            - int: single feature by index
-            - str: single feature by name (requires `feature_names_in`)
-            - Sequence[int]: multiple features by index
-            - Sequence[str]: multiple features by name
-            - None: all features (including intercept if `fit_intercept=True`)
-
-        Returns
-        -------
-        self : FirthLogisticRegression
-
-        Examples
-        --------
-        >>> model.fit(X, y).lrt()  # compute LR for all features
-        >>> model.lrt_pvalues_
-        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
-        >>> model.lrt_bse_
-        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
-        >>> model.fit(X, y).lrt(0)
-        >>> model.lrt_pvalues_
-        array([0.00020841,        nan,        nan,        nan])
-        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
-        >>> model.lrt_pvalues_
-        array([0.00020841,        nan, 0.02363857,        nan])
-        """
-        check_is_fitted(self)
-        indices = self._resolve_feature_indices(features)
-
-        # compute LRT
-        for idx in indices:
-            if np.isnan(self.lrt_pvalues_[idx]):
-                self._compute_single_lrt(idx)
-        return self
-
-    def _compute_single_lrt(self, idx: int) -> None:
-        """
-        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
-        back-corrected standard error.
-
-        Parameters
-        ----------
-        idx : int
-            Index of the coefficient to test. Use len(coef_) for the intercept.
-        """
-        X, y, sample_weight, offset = self._fit_data
-
-        def compute_quantities_full(beta):
-            return compute_logistic_quantities(
-                X=X,
-                y=y,
-                beta=beta,
-                sample_weight=sample_weight,
-                offset=offset,
-                workspace=self._workspace,
-            )
-
-        if self.fit_intercept:
-            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
-        else:
-            beta_hat_full = self.coef_
-
-        result = constrained_lrt_1df(
-            idx=idx,
-            beta_hat_full=beta_hat_full,
-            loglik_full=self.loglik_,
-            compute_quantities_full=compute_quantities_full,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
-
-        self.lrt_pvalues_[idx] = result.pvalue
-        self.lrt_bse_[idx] = result.bse_backcorrected
 
     def _resolve_feature_indices(
         self,
