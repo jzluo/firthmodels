@@ -3,6 +3,7 @@ import pytest
 from scipy.special import expit
 
 from firthmodels import NUMBA_AVAILABLE
+from firthmodels._solvers import newton_raphson
 from firthmodels.logistic import _Workspace, compute_logistic_quantities
 
 pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available")
@@ -11,7 +12,12 @@ if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         compute_logistic_quantities as compute_logistic_quantities_numba,
     )
-    from firthmodels._numba.logistic import expit, log1pexp, max_abs
+    from firthmodels._numba.logistic import (
+        expit,
+        log1pexp,
+        max_abs,
+        newton_raphson_logistic,
+    )
 
 
 @pytest.mark.parametrize(
@@ -59,3 +65,40 @@ def test_compute_logistic_quantities():
     np.testing.assert_allclose(loglik, ref.loglik, rtol=1e-14)
     np.testing.assert_allclose(ws.temp_k, ref.modified_score, rtol=1e-14)
     np.testing.assert_allclose(ws.fisher_info_aug, ref.fisher_info, rtol=1e-14)
+
+
+def run_both_backends(X, y, sample_weight=None, offset=None, **solver_params):
+    n, k = X.shape
+    if sample_weight is None:
+        sample_weight = np.ones(n, dtype=np.float64)
+    if offset is None:
+        offset = np.zeros(n, dtype=np.float64)
+
+    defaults = dict(max_iter=25, max_step=5.0, max_halfstep=25, gtol=1e-4, xtol=1e-4)
+    defaults.update(solver_params)
+
+    # numpy/scipy backend
+    workspace = _Workspace(n, k)
+
+    def compute_quantities(beta):
+        return compute_logistic_quantities(X, y, beta, sample_weight, offset, workspace)
+
+    ref = newton_raphson(compute_quantities, k, **defaults)
+
+    # numba backend
+    numba_result = newton_raphson_logistic(
+        X, y, sample_weight, offset, workspace=workspace.numba_buffers(), **defaults
+    )
+
+    return ref, numba_result
+
+
+class TestNewtonRaphsonNumba:
+    def test_separated_data(self):
+        X = np.array([[0.0], [0.0], [0.0], [1.0], [1.0], [1.0]])
+        y = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+
+        ref, numba = run_both_backends(X, y)
+
+        assert numba[-1] == True
+        np.testing.assert_allclose(numba[0], ref.beta, rtol=1e-14)

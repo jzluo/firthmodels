@@ -2,10 +2,19 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from firthmodels._numba.linalg import dgemm, dgetrf, dgetri, dpotrf, dpotri, dsyrk
+from firthmodels._numba.linalg import (
+    _alloc_f_order,
+    dgemm,
+    dgetrf,
+    dgetri,
+    dpotrf,
+    dpotri,
+    dpotrs,
+    dsyrk,
+)
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def expit(x: float) -> float:
     if x >= 0.0:
         z = np.exp(-x)
@@ -14,14 +23,24 @@ def expit(x: float) -> float:
     return z / (1.0 + z)
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def log1pexp(x: float) -> float:
     if x > 0.0:
         return x + np.log1p(np.exp(-x))
     return np.log1p(np.exp(x))
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
+def max_abs(vec: NDArray[np.float64]) -> float:
+    max_val = 0.0
+    for i in range(vec.shape[0]):
+        abs_val = abs(vec[i])
+        if abs_val > max_val:
+            max_val = abs_val
+    return max_val
+
+
+@njit(fastmath=True, cache=True)
 def compute_logistic_quantities(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
@@ -134,12 +153,13 @@ def compute_logistic_quantities(
     return loglik, 0
 
 
-@njit(fastmath=True)
+@njit(fastmath=True, cache=True)
 def newton_raphson_logistic(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
+    sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
-    maxiter: int,
+    max_iter: int,
     max_step: float,
     max_halfstep: int,
     gtol: float,
@@ -148,4 +168,100 @@ def newton_raphson_logistic(
 ) -> tuple[
     NDArray[np.float64], float, NDArray[np.float64], int, bool
 ]:  # beta, loglik, fisher_info_aug, max_iter, converge_yn
-    raise NotImplementedError
+    (
+        eta,
+        p,
+        w,
+        sqrt_w,
+        XtW,
+        fisher_info,  # use this as a scratch array
+        solved,
+        h,
+        w_aug,
+        sqrt_w_aug,
+        XtW_aug,
+        fisher_info_aug,
+        residual,
+        modified_score,
+    ) = workspace
+
+    n = X.shape[0]
+    k = X.shape[1]
+    beta = np.zeros(k, dtype=np.float64)
+    beta_new = np.zeros(k, dtype=np.float64)
+    score_col = _alloc_f_order(k, 1)
+    delta = np.zeros(k, dtype=np.float64)
+
+    loglik, info = compute_logistic_quantities(
+        X, y, beta, sample_weight, offset, workspace
+    )
+    if info != 0:
+        return beta, loglik, fisher_info_aug, 0, False
+
+    for iteration in range(1, max_iter + 1):
+        fisher_info[:, :] = fisher_info_aug
+
+        info = dpotrf(fisher_info)
+        if info != 0:
+            return beta, loglik, fisher_info_aug, iteration, False
+
+        for i in range(k):
+            score_col[i, 0] = modified_score[i]
+
+        info = dpotrs(fisher_info, score_col)
+        if info != 0:
+            return beta, loglik, fisher_info_aug, iteration, False
+
+        for i in range(k):
+            delta[i] = score_col[i, 0]
+
+        max_score = max_abs(modified_score)
+        max_delta = max_abs(delta)
+        if max_score < gtol and max_delta < xtol:
+            return beta, loglik, fisher_info_aug, iteration, True
+
+        if max_delta > max_step:
+            scale = max_step / max_delta
+            for i in range(k):
+                delta[i] *= scale
+
+        # try full step first
+        for i in range(k):
+            beta_new[i] = beta[i] + delta[i]
+
+        loglik_new, info = compute_logistic_quantities(
+            X, y, beta_new, sample_weight, offset, workspace
+        )
+        if info != 0:
+            return beta, loglik, fisher_info_aug, iteration, False
+
+        if loglik_new >= loglik or max_halfstep == 0:
+            for i in range(k):
+                beta[i] = beta_new[i]
+            loglik = loglik_new
+        else:
+            # Step-halving until loglik improves
+            step_factor = 0.5
+            accepted = False
+            for _ in range(max_halfstep):
+                for i in range(k):
+                    beta_new[i] = beta[i] + step_factor * delta[i]
+
+                loglik_new, info = compute_logistic_quantities(
+                    X, y, beta_new, sample_weight, offset, workspace
+                )
+                if info != 0:
+                    return beta, loglik, fisher_info_aug, iteration, False
+
+                if loglik_new >= loglik:
+                    for i in range(k):
+                        beta[i] = beta_new[i]
+                    loglik = loglik_new
+                    accepted = True
+                    break
+                step_factor *= 0.5
+
+            if not accepted:  # step-halving failed, return early
+                return beta, loglik, fisher_info_aug, iteration, False
+
+    return beta, loglik, fisher_info_aug, iteration, False

@@ -627,6 +627,24 @@ class _Workspace:
         self.residual = np.empty(n, dtype=np.float64)
         self.temp_k = np.empty(k, dtype=np.float64)
 
+    def numba_buffers(self):  # for numba
+        return (
+            self.eta,
+            self.p,
+            self.w,
+            self.sqrt_w,
+            self.XtW,
+            self.fisher_info,
+            self.solved,
+            self.h,
+            self.w_aug,
+            self.sqrt_w_aug,
+            self.XtW_aug,
+            self.fisher_info_aug,
+            self.residual,
+            self.temp_k,  # used as modified_score
+        )
+
 
 def compute_logistic_quantities(
     X: NDArray[np.float64],
