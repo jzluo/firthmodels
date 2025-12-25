@@ -97,22 +97,27 @@ def compute_logistic_quantities(
     dsyrk(XtW, fisher_info)
     info = dpotrf(fisher_info)
     if info != 0:
-        return -np.inf, info
+        # dpotrf failed and fisher_info was overwritten, so recompute
+        dsyrk(XtW, fisher_info)
+        sign, logdet = np.linalg.slogdet(fisher_info)
+        if sign <= 0:
+            return -np.inf, 1
+        solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
+    else:
+        logdet = 0.0
+        for i in range(k):
+            logdet += np.log(fisher_info[i, i])
+        logdet *= 2.0
 
-    logdet = 0.0
-    for i in range(k):
-        logdet += np.log(fisher_info[i, i])
-    logdet *= 2.0
+        info = dpotri(fisher_info)
+        if info != 0:
+            return -np.inf, info
 
-    info = dpotri(fisher_info)
-    if info != 0:
-        return -np.inf, info
+        for i in range(k):
+            for j in range(i + 1, k):
+                fisher_info[i, j] = fisher_info[j, i]
 
-    for i in range(k):
-        for j in range(i + 1, k):
-            fisher_info[i, j] = fisher_info[j, i]
-
-    dgemm(fisher_info, XtW, solved)
+        dgemm(fisher_info, XtW, solved)
 
     # h = np.einsum("ij,ij->j", solved, XtW)
     for i in range(n):
@@ -203,17 +208,17 @@ def newton_raphson_logistic(
 
         info = dpotrf(fisher_info)
         if info != 0:
-            return beta, loglik, fisher_info_aug, iteration, False
+            delta[:] = np.linalg.lstsq(fisher_info_aug, modified_score)[0]
+        else:
+            for i in range(k):
+                score_col[i, 0] = modified_score[i]
 
-        for i in range(k):
-            score_col[i, 0] = modified_score[i]
+            info = dpotrs(fisher_info, score_col)
+            if info != 0:
+                return beta, loglik, fisher_info_aug, iteration, False
 
-        info = dpotrs(fisher_info, score_col)
-        if info != 0:
-            return beta, loglik, fisher_info_aug, iteration, False
-
-        for i in range(k):
-            delta[i] = score_col[i, 0]
+            for i in range(k):
+                delta[i] = score_col[i, 0]
 
         max_score = max_abs(modified_score)
         max_delta = max_abs(delta)
