@@ -175,3 +175,27 @@ class TestFirthLogisticRegressionNumba:
             model = FirthLogisticRegression(backend="numba")
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
+
+
+def test_numba_symmetrizes_fisher_info_on_cholesky_fail():
+    rng = np.random.default_rng(0)
+    n = 8
+    x = rng.standard_normal(n)
+    X = np.column_stack([x, x])  # rank deficient
+    y = rng.integers(0, 2, n).astype(np.float64)
+    beta = np.zeros(2, dtype=np.float64)
+    sample_weight = np.ones(n, dtype=np.float64)
+    offset = np.zeros(n, dtype=np.float64)
+
+    ws = _Workspace(n, 2)
+    loglik, info = compute_logistic_quantities_numba(
+        X, y, beta, sample_weight, offset, ws.numba_buffers()
+    )
+
+    assert info != 0
+    sqrt_w = np.sqrt(sample_weight * 0.25)
+    XtW = X.T * sqrt_w
+    expected = XtW @ XtW.T
+    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(ws.fisher_info, ws.fisher_info.T, rtol=0, atol=0)
+    assert np.isneginf(loglik)

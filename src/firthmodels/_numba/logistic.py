@@ -12,6 +12,7 @@ from firthmodels._numba.linalg import (
     dpotri,
     dpotrs,
     dsyrk,
+    symmetrize_lower,
 )
 
 
@@ -100,6 +101,7 @@ def compute_logistic_quantities(
     if info != 0:
         # dpotrf failed and fisher_info was overwritten, so recompute
         dsyrk(XtW, fisher_info)
+        symmetrize_lower(fisher_info)
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
             return -np.inf, 1

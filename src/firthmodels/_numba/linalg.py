@@ -9,10 +9,18 @@ from numpy.typing import NDArray
 from firthmodels._blas_abi import BLAS_FLAG_DTYPE, BLAS_INT_DTYPE
 
 
-@njit(inline="always")
+@njit(inline="always", cache=True)
 def _alloc_f_order(rows: int, cols: int) -> NDArray[np.float64]:
     temp = np.empty((cols, rows), dtype=np.float64)
     return temp.T
+
+
+@njit(inline="always", cache=True)
+def symmetrize_lower(A: NDArray[np.float64]) -> None:
+    n = A.shape[0]
+    for j in range(1, n):
+        for i in range(j):
+            A[i, j] = A[j, i]
 
 
 _SYMBOLS = {
