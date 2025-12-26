@@ -116,9 +116,7 @@ def compute_logistic_quantities(
         if info != 0:
             return -np.inf, info
 
-        for i in range(k):
-            for j in range(i + 1, k):
-                fisher_info[i, j] = fisher_info[j, i]
+        symmetrize_lower(fisher_info)
 
         dgemm(fisher_info, XtW, solved)
 
@@ -140,9 +138,7 @@ def compute_logistic_quantities(
             XtW_aug[j, i] = X[i, j] * w_i
 
     dsyrk(XtW_aug, fisher_info_aug)
-    for i in range(k):
-        for j in range(i + 1, k):
-            fisher_info_aug[i, j] = fisher_info_aug[j, i]
+    symmetrize_lower(fisher_info_aug)
 
     loglik = 0.0
     for i in range(n):
