@@ -72,6 +72,65 @@ def test_compute_logistic_quantities():
     np.testing.assert_allclose(ws.fisher_info_aug, ref.fisher_info, rtol=1e-14)
 
 
+def test_compute_logistic_quantities_non_pd_symmetrizes():
+    rng = np.random.default_rng(0)
+    n = 12
+    x = rng.standard_normal(n)
+    X = np.column_stack([x, np.zeros_like(x)])  # rank-deficient
+    y = rng.integers(0, 2, n).astype(np.float64)
+    beta = np.zeros(2, dtype=np.float64)
+    sample_weight = np.ones(n, dtype=np.float64)
+    offset = np.zeros(n, dtype=np.float64)
+
+    ws = _Workspace(n, 2)
+    loglik, info = compute_logistic_quantities_numba(
+        X,
+        y,
+        beta,
+        sample_weight,
+        offset,
+        ws.numba_buffers(),
+    )
+
+    assert info != 0
+    p = scipy_expit(np.zeros(n))
+    w = sample_weight * p * (1.0 - p)
+    XtW = X.T * np.sqrt(w)
+    expected = XtW @ XtW.T
+    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(ws.fisher_info, ws.fisher_info.T, atol=0.0)
+    assert np.isneginf(loglik)
+
+
+def test_newton_raphson_numba_poison_fisher_info_on_failure():
+    rng = np.random.default_rng(0)
+    n = 12
+    x = rng.standard_normal(n)
+    X = np.column_stack([x, np.zeros_like(x)])  # rank-deficient
+    y = rng.integers(0, 2, n).astype(np.float64)
+    sample_weight = np.ones(n, dtype=np.float64)
+    offset = np.zeros(n, dtype=np.float64)
+
+    ws = _Workspace(n, 2)
+    beta, loglik, fisher_info, n_iter, converged = newton_raphson_logistic(
+        X,
+        y,
+        sample_weight,
+        offset,
+        max_iter=25,
+        max_step=5.0,
+        max_halfstep=25,
+        gtol=1e-4,
+        xtol=1e-4,
+        workspace=ws.numba_buffers(),
+    )
+
+    assert not converged
+    assert n_iter == 0
+    assert np.isnan(fisher_info).all()
+    assert np.isneginf(loglik)
+
+
 def run_both_backends(X, y, sample_weight=None, offset=None, **solver_params):
     n, k = X.shape
     if sample_weight is None:
