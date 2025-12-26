@@ -7,7 +7,7 @@ from firthmodels._numba.linalg import (
     _alloc_f_order,
     dgemm,
     dgetrf,
-    dgetri,
+    dgetrs,
     dpotrf,
     dpotri,
     dpotrs,
@@ -32,7 +32,7 @@ def log1pexp(x: float) -> float:
     return np.log1p(np.exp(x))
 
 
-@njit(cache=True)
+@njit(cache=True, fastmath=False)
 def max_abs(vec: NDArray[np.float64]) -> float:
     max_val = 0.0
     for i in range(vec.shape[0]):
@@ -499,9 +499,8 @@ def profile_ci_bound_logistic(
     F = np.empty(k, dtype=np.float64)
     D = np.empty((k, k), dtype=np.float64)
     G = _alloc_f_order(k, k)
-    G_inv = _alloc_f_order(k, k)
     ipiv = np.zeros(k, dtype=BLAS_INT_DTYPE)
-    work = np.empty(max(1, k * k), dtype=np.float64)
+    rhs = _alloc_f_order(k, 2)
     v = np.empty(k, dtype=np.float64)
     g_j = np.empty(k, dtype=np.float64)
     Dg = np.empty(k, dtype=np.float64)
@@ -543,35 +542,32 @@ def profile_ci_bound_logistic(
 
         # Appendix step 6: v = G^-1 F (direction to subtract)
         for i in range(k):
-            for j in range(k):
-                G_inv[i, j] = G[i, j]
-        for i in range(k):
             ipiv[i] = 0
 
-        info = dgetrf(G_inv, ipiv)
+        info = dgetrf(G, ipiv)
         if info != 0:
             return theta[idx], False, iteration
 
-        info = dgetri(G_inv, ipiv, work)
-        if info != 0:
-            return theta[idx], False, iteration
-
-        # v = G_inv @ F
+        # Solve G * [v, g_j] = [F, e_idx] without forming G^-1.
         for i in range(k):
-            total = 0.0
-            for j in range(k):
-                total += G_inv[i, j] * F[j]
-            v[i] = total
+            rhs[i, 0] = F[i]
+            rhs[i, 1] = 0.0
+        rhs[idx, 1] = 1.0
+
+        info = dgetrs(G, ipiv, rhs)
+        if info != 0:
+            return theta[idx], False, iteration
+
+        for i in range(k):
+            v[i] = rhs[i, 0]
+            g_j[i] = rhs[i, 1]
 
         # Appendix step 7: quadratic correction
         # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)
-        # g_j = G_inv[:, idx]
+        # g_j solves G * g_j = e_idx
         # a = g_j @ D @ g_j
         # b = 2 * v @ D @ g_j - 2
         # c = v @ D @ v
-
-        for i in range(k):
-            g_j[i] = G_inv[i, idx]
 
         for i in range(k):
             total = 0.0

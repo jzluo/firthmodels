@@ -31,6 +31,7 @@ _SYMBOLS = {
     "firth_dpotrs": ("scipy.linalg.cython_lapack", "dpotrs"),
     "firth_dgetrf": ("scipy.linalg.cython_lapack", "dgetrf"),
     "firth_dgetri": ("scipy.linalg.cython_lapack", "dgetri"),
+    "firth_dgetrs": ("scipy.linalg.cython_lapack", "dgetrs"),
 }
 
 for symbol, (module, name) in _SYMBOLS.items():
@@ -116,6 +117,16 @@ def _dgetri_call(typingctx, n, A, lda, ipiv, work, lwork, info):
 
     def codegen(context, builder, signature, args):
         return _external_call_codegen("firth_dgetri", context, builder, signature, args)
+
+    return sig, codegen
+
+
+@intrinsic
+def _dgetrs_call(typingctx, trans, n, nrhs, A, lda, ipiv, B, ldb, info):
+    sig = types.void(trans, n, nrhs, A, lda, ipiv, B, ldb, info)
+
+    def codegen(context, builder, signature, args):
+        return _external_call_codegen("firth_dgetrs", context, builder, signature, args)
 
     return sig, codegen
 
@@ -220,4 +231,19 @@ def dgetri(A: np.ndarray, ipiv: np.ndarray, work: np.ndarray) -> int:
     info = np.array([0], dtype=BLAS_INT_DTYPE)
 
     _dgetri_call(n_arr, A, lda, ipiv, work, lwork, info)
+    return int(info[0])
+
+
+@njit(cache=True)
+def dgetrs(A: np.ndarray, ipiv: np.ndarray, B: np.ndarray) -> int:
+    n = A.shape[0]
+    nrhs = B.shape[1]
+    trans = np.array([ord("N")], dtype=BLAS_FLAG_DTYPE)
+    n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
+    nrhs_arr = np.array([nrhs], dtype=BLAS_INT_DTYPE)
+    lda = np.array([n], dtype=BLAS_INT_DTYPE)
+    ldb = np.array([n], dtype=BLAS_INT_DTYPE)
+    info = np.array([0], dtype=BLAS_INT_DTYPE)
+
+    _dgetrs_call(trans, n_arr, nrhs_arr, A, lda, ipiv, B, ldb, info)
     return int(info[0])
