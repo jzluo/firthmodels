@@ -40,6 +40,11 @@ def test_max_abs():
     np.testing.assert_allclose(max_abs(arr), np.abs(arr).max())
 
 
+def test_max_abs_nan_returns_inf():
+    arr = np.array([1e-6, np.nan, 1e-7])
+    assert max_abs(arr) == np.inf
+
+
 def test_compute_logistic_quantities():
     rng = np.random.default_rng(0)
     n, k = 50, 5

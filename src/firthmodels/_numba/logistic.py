@@ -32,11 +32,14 @@ def log1pexp(x: float) -> float:
     return np.log1p(np.exp(x))
 
 
-@njit(fastmath=True, cache=True)
+@njit(cache=True)
 def max_abs(vec: NDArray[np.float64]) -> float:
     max_val = 0.0
     for i in range(vec.shape[0]):
-        abs_val = abs(vec[i])
+        val = vec[i]
+        if np.isnan(val):
+            return np.inf
+        abs_val = abs(val)
         if abs_val > max_val:
             max_val = abs_val
     return max_val
