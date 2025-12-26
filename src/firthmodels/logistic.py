@@ -270,11 +270,20 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.converged_ = result.converged
 
         # === Wald ===
-        try:
-            cov = np.linalg.inv(result.fisher_info)
-            bse = np.sqrt(np.diag(cov))
-        except np.linalg.LinAlgError:
+        if not np.all(np.isfinite(result.fisher_info)):
+            warnings.warn(
+                "Fisher information matrix is not finite; "
+                "standard errors and p-values cannot be computed.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             bse = np.full_like(result.beta, np.nan)
+        else:
+            try:
+                cov = np.linalg.inv(result.fisher_info)
+                bse = np.sqrt(np.diag(cov))
+            except np.linalg.LinAlgError:
+                bse = np.full_like(result.beta, np.nan)
 
         z = result.beta / bse
         pvalues = 2 * scipy.stats.norm.sf(np.abs(z))

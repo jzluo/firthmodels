@@ -84,7 +84,8 @@ class TestFirthLogisticRegression:
 
     @pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
     @pytest.mark.filterwarnings(
-        "ignore:invalid value encountered in sqrt:RuntimeWarning"
+        "ignore:invalid value encountered in sqrt:RuntimeWarning",
+        "ignore:Fisher information matrix is not finite:RuntimeWarning",
     )
     def test_sklearn_compatible(self):
         """Passes sklearn's estimator checks."""

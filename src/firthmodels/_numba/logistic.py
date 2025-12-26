@@ -203,6 +203,7 @@ def newton_raphson_logistic(
         X, y, beta, sample_weight, offset, workspace
     )
     if info != 0:
+        fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
         return beta, loglik, fisher_info_aug, 0, False
 
     for iteration in range(1, max_iter + 1):
@@ -217,6 +218,7 @@ def newton_raphson_logistic(
 
             info = dpotrs(fisher_info, score_col)
             if info != 0:
+                fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
                 return beta, loglik, fisher_info_aug, iteration, False
 
             for i in range(k):
@@ -240,6 +242,7 @@ def newton_raphson_logistic(
             X, y, beta_new, sample_weight, offset, workspace
         )
         if info != 0:
+            fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
             return beta, loglik, fisher_info_aug, iteration, False
 
         if loglik_new >= loglik or max_halfstep == 0:
@@ -258,6 +261,7 @@ def newton_raphson_logistic(
                     X, y, beta_new, sample_weight, offset, workspace
                 )
                 if info != 0:
+                    fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
                     return beta, loglik, fisher_info_aug, iteration, False
 
                 if loglik_new >= loglik:
