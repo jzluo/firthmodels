@@ -82,7 +82,9 @@ def compute_logistic_quantities(
         for j in range(k):
             total += X[i, j] * beta[j]
         eta[i] = total
-        p[i] = expit(total)
+
+    for i in range(n):
+        p[i] = expit(eta[i])
 
     for i in range(n):
         w_i = sample_weight[i] * p[i] * (1.0 - p[i])
