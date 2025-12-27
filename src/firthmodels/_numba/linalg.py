@@ -26,6 +26,7 @@ def symmetrize_lower(A: NDArray[np.float64]) -> None:
 _SYMBOLS = {
     "firth_dsyrk": ("scipy.linalg.cython_blas", "dsyrk"),
     "firth_dgemm": ("scipy.linalg.cython_blas", "dgemm"),
+    "firth_dgemv": ("scipy.linalg.cython_blas", "dgemv"),
     "firth_dpotrf": ("scipy.linalg.cython_lapack", "dpotrf"),
     "firth_dpotri": ("scipy.linalg.cython_lapack", "dpotri"),
     "firth_dpotrs": ("scipy.linalg.cython_lapack", "dpotrs"),
@@ -67,6 +68,16 @@ def _dgemm_call(
 
     def codegen(context, builder, signature, args):
         return _external_call_codegen("firth_dgemm", context, builder, signature, args)
+
+    return sig, codegen
+
+
+@intrinsic
+def _dgemv_call(typingctx, trans, m, n, alpha, A, lda, x, incx, beta, y, incy):
+    sig = types.void(trans, m, n, alpha, A, lda, x, incx, beta, y, incy)
+
+    def codegen(context, builder, signature, args):
+        return _external_call_codegen("firth_dgemv", context, builder, signature, args)
 
     return sig, codegen
 
@@ -168,6 +179,22 @@ def dgemm(A: np.ndarray, B: np.ndarray, C: np.ndarray) -> None:
     _dgemm_call(
         transa, transb, m_arr, n_arr, k_arr, alpha, A, lda, B, ldb, beta, C, ldc
     )
+
+
+@njit(cache=True)
+def dgemv(A: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
+    m = A.shape[0]
+    n = A.shape[1]
+    trans = np.array([ord("N")], dtype=BLAS_FLAG_DTYPE)
+    m_arr = np.array([m], dtype=BLAS_INT_DTYPE)
+    n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
+    alpha = np.array([1.0], dtype=np.float64)
+    lda = np.array([m], dtype=BLAS_INT_DTYPE)
+    incx = np.array([1], dtype=BLAS_INT_DTYPE)
+    beta = np.array([0.0], dtype=np.float64)
+    incy = np.array([1], dtype=BLAS_INT_DTYPE)
+
+    _dgemv_call(trans, m_arr, n_arr, alpha, A, lda, x, incx, beta, y, incy)
 
 
 @njit(cache=True)

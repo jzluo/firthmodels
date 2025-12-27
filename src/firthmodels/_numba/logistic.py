@@ -6,6 +6,7 @@ from firthmodels._blas_abi import BLAS_INT_DTYPE
 from firthmodels._numba.linalg import (
     _alloc_f_order,
     dgemm,
+    dgemv,
     dgetrf,
     dgetrs,
     dpotrf,
@@ -151,11 +152,7 @@ def compute_logistic_quantities(
     for i in range(n):
         residual[i] = sample_weight[i] * (y[i] - p[i]) + h[i] * (0.5 - p[i])
 
-    for j in range(k):
-        total = 0.0
-        for i in range(n):
-            total += X[i, j] * residual[i]
-        modified_score[j] = total
+    dgemv(X.T, residual, modified_score)
 
     return loglik, 0
 
