@@ -1,3 +1,18 @@
+"""
+Infer BLAS/LAPACK integer ABI from scipy Cython capsules.
+
+Parses scipy's capsule signatures for BLAS/LAPACK symbols to infer the
+integer type used by the linked libraries. If no signature is available, fall
+back to "int".
+
+Exports:
+    BLAS_INT_TOKEN: detected token ("int", "long", "long long")
+    BLAS_INT_CTYPE: ctypes type for BLAS integers
+    BLAS_INT_DTYPE: numpy dtype for BLAS integers
+    BLAS_FLAG_CTYPE: ctypes type for character flags (uint8)
+    BLAS_FLAG_DTYPE: numpy dtype for character flags (uint8)
+"""
+
 from __future__ import annotations
 
 import ctypes
