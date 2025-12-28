@@ -480,7 +480,7 @@ def profile_ci_bound_logistic(
         d2l_db2 = D0[idx, idx]
         for i in range(k - 1):
             d2l_db2 += D0_bw[i] * dw_db[i]
-    else:  # single paramete case
+    else:  # single parameter case
         dw_db = np.empty(0, dtype=np.float64)
         d2l_db2 = D0[idx, idx]
 
