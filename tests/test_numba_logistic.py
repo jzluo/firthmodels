@@ -11,6 +11,7 @@ pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         _STATUS_CONVERGED,
+        _STATUS_STEP_HALVING_FAILED,
         expit,
         log1pexp,
         max_abs,
@@ -154,6 +155,56 @@ class TestNewtonRaphsonNumba:
 
         assert numba[-1] == _STATUS_CONVERGED
         np.testing.assert_allclose(numba[0], ref.beta, rtol=1e-14)
+
+    def test_step_halving_failure_returns_consistent_fisher_info(self):
+        # dataset chosen to deterministically hit the step-halving failure path.
+        X = np.array(
+            [
+                [2.04091912],
+                [-2.55566503],
+                [0.41809885],
+                [-0.56776961],
+                [-0.45264929],
+                [-0.21559716],
+            ],
+            dtype=np.float64,
+        )
+        y = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0], dtype=np.float64)
+        sample_weight = np.ones(6, dtype=np.float64)
+        offset = np.zeros(6, dtype=np.float64)
+
+        workspace = _Workspace(6, 1)
+        beta, loglik, fisher_info, _, status = newton_raphson_logistic(
+            X,
+            y,
+            sample_weight,
+            offset,
+            max_iter=25,
+            max_step=5.0,
+            max_halfstep=1,
+            gtol=1e-12,
+            xtol=1e-12,
+            workspace=workspace.numba_buffers(),
+        )
+        assert status == _STATUS_STEP_HALVING_FAILED
+        fisher_info = fisher_info.copy()
+
+        ref_workspace = _Workspace(6, 1)
+        # Recompute quantities for the returned beta to make sure the returned fisher_info
+        # corresponds to the accepted (rather than tried and rejected) beta and loglik
+        loglik_ref = compute_logistic_quantities_numba(
+            X,
+            y,
+            beta,
+            sample_weight,
+            offset,
+            ref_workspace.numba_buffers(),
+        )
+
+        np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)
+        np.testing.assert_allclose(
+            ref_workspace.fisher_info_aug, fisher_info, rtol=1e-10
+        )
 
 
 class TestFirthLogisticRegressionNumba:
