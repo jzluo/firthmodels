@@ -481,9 +481,9 @@ def profile_ci_bound_logistic(
         d2l_db2 = D0[idx, idx]
 
     if d2l_db2 >= 0.0:
-        h = which * 0.5
+        h_step = which * 0.5
     else:
-        h = which * np.sqrt(chi2_crit / abs(d2l_db2)) / 2.0
+        h_step = which * np.sqrt(chi2_crit / abs(d2l_db2)) / 2.0
 
     # Appendix step 3: theta(1) = theta_hat + h * [1, dw/dbeta]' (Eq. 4)
     tangent = np.zeros(k, dtype=np.float64)
@@ -493,7 +493,7 @@ def profile_ci_bound_logistic(
             tangent[other_idx[i]] = dw_db[i]
 
     for i in range(k):
-        theta[i] += h * tangent[i]
+        theta[i] += h_step * tangent[i]
 
     F = np.empty(k, dtype=np.float64)
     D = np.empty((k, k), dtype=np.float64)
