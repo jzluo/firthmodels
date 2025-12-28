@@ -47,6 +47,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     Parameters
     ----------
+    backend : {'auto', 'numba', 'numpy'}, default='auto'
+        Computational backend to use.
+        - 'auto': uses the Numba implementation when available, otherwise falls back to
+          the NumPy/SciPy path.
+        - 'numba': forces the Numba backend (raises ImportError if Numba isn't installed).
+        - 'numpy': forces the NumPy/SciPy implementation.
     solver : {'newton-raphson'}, default='newton-raphson'
         Optimization algorithm. Only 'newton-raphson' is currently supported.
     max_iter : int, default=25
@@ -119,6 +125,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     def __init__(
         self,
+        backend: Literal["auto", "numba", "numpy"] = "auto",
         solver: Literal["newton-raphson"] = "newton-raphson",
         max_iter: int = 25,
         max_step: float = 5.0,
@@ -126,7 +133,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         gtol: float = 1e-4,
         xtol: float = 1e-4,
         fit_intercept: bool = True,
-        backend: Literal["auto", "numba", "numpy"] = "auto",
     ) -> None:
         self.solver = solver
         self.max_iter = max_iter
