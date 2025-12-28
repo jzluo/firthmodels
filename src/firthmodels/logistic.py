@@ -156,12 +156,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             if not NUMBA_AVAILABLE:
                 raise ImportError("backend='numba' but numba is not installed.")
             return "numba"
-        else:
-            if self.backend not in ["auto", "numba", "numpy"]:
-                raise ValueError(
-                    f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
-                )
+        if self.backend == "numpy":
             return "numpy"
+        raise ValueError(
+            f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
+        )
 
     def fit(
         self,
