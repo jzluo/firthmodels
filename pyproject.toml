@@ -48,6 +48,9 @@ Issues = "https://github.com/jzluo/firthmodels/issues"
 formula = [
     "formulaic>=1.2.1",
 ]
+numba = [
+    "numba>=0.63",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -61,6 +64,7 @@ dev = [
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
+    "numba>=0.63",
 ]
 
 [tool.ruff]
