@@ -23,6 +23,9 @@ from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
+        _STATUS_CONVERGED,
+        _STATUS_MAX_ITER,
+        _STATUS_STEP_HALVING_FAILED,
         constrained_lrt_1df_logistic,
         newton_raphson_logistic,
         profile_ci_bound_logistic,
@@ -221,7 +224,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         workspace = _Workspace(n=X.shape[0], k=n_features)
 
         if self._resolve_backend() == "numba":
-            beta, loglik, fisher_info, n_iter, converged = newton_raphson_logistic(
+            beta, loglik, fisher_info, n_iter, status = newton_raphson_logistic(
                 X=X,
                 y=y,
                 sample_weight=sample_weight,
@@ -233,12 +236,24 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 gtol=self.gtol,
                 xtol=self.xtol,
             )
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
             result = FirthResult(
                 beta=beta,
                 loglik=loglik,
                 fisher_info=fisher_info,
                 n_iter=n_iter,
-                converged=converged,
+                converged=(status == _STATUS_CONVERGED),
             )
         else:
 
@@ -377,7 +392,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             beta_hat_full = self.coef_
 
         if self._resolve_backend() == "numba":
-            loglik_constrained, n_iter, converged = constrained_lrt_1df_logistic(
+            loglik_constrained, n_iter, status = constrained_lrt_1df_logistic(
                 X=X,
                 y=y,
                 sample_weight=sample_weight,
@@ -390,6 +405,18 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
             )
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=3,
+                )
             chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
             pvalue = scipy.stats.chi2.sf(chi2, df=1)
             #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2

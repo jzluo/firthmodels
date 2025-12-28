@@ -10,13 +10,14 @@ pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available
 
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
-        compute_logistic_quantities as compute_logistic_quantities_numba,
-    )
-    from firthmodels._numba.logistic import (
+        _STATUS_CONVERGED,
         expit,
         log1pexp,
         max_abs,
         newton_raphson_logistic,
+    )
+    from firthmodels._numba.logistic import (
+        compute_logistic_quantities as compute_logistic_quantities_numba,
     )
 
 
@@ -57,7 +58,7 @@ def test_compute_logistic_quantities():
     ws = _Workspace(n, k)
     ref = compute_logistic_quantities(X, y, beta, sample_weight, offset, ws)
 
-    loglik, info = compute_logistic_quantities_numba(
+    loglik = compute_logistic_quantities_numba(
         X,
         y,
         beta,
@@ -66,7 +67,6 @@ def test_compute_logistic_quantities():
         ws.numba_buffers(),
     )
 
-    assert info == 0
     np.testing.assert_allclose(loglik, ref.loglik, rtol=1e-14)
     np.testing.assert_allclose(ws.temp_k, ref.modified_score, rtol=1e-14)
     np.testing.assert_allclose(ws.fisher_info_aug, ref.fisher_info, rtol=1e-14)
@@ -83,7 +83,7 @@ def test_compute_logistic_quantities_non_pd_symmetrizes():
     offset = np.zeros(n, dtype=np.float64)
 
     ws = _Workspace(n, 2)
-    loglik, info = compute_logistic_quantities_numba(
+    loglik = compute_logistic_quantities_numba(
         X,
         y,
         beta,
@@ -92,7 +92,6 @@ def test_compute_logistic_quantities_non_pd_symmetrizes():
         ws.numba_buffers(),
     )
 
-    assert info == 0
     p = scipy_expit(np.zeros(n))
     w = sample_weight * p * (1.0 - p)
     XtW = X.T * np.sqrt(w)
@@ -153,7 +152,7 @@ class TestNewtonRaphsonNumba:
 
         ref, numba = run_both_backends(X, y)
 
-        assert numba[-1] == True
+        assert numba[-1] == _STATUS_CONVERGED
         np.testing.assert_allclose(numba[0], ref.beta, rtol=1e-14)
 
 
@@ -241,7 +240,7 @@ def test_numba_symmetrizes_fisher_info_on_cholesky_fail():
     offset = np.zeros(n, dtype=np.float64)
 
     ws = _Workspace(n, 2)
-    loglik, info = compute_logistic_quantities_numba(
+    loglik = compute_logistic_quantities_numba(
         X, y, beta, sample_weight, offset, ws.numba_buffers()
     )
 

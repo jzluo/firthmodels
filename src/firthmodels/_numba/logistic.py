@@ -7,6 +7,11 @@ and src/firthmodels/_solvers.py.
 
 import numpy as np
 from numba import njit
+
+# Solver exit status codes
+_STATUS_CONVERGED = 0
+_STATUS_STEP_HALVING_FAILED = 1
+_STATUS_MAX_ITER = 2
 from numpy.typing import NDArray
 
 from firthmodels._blas_abi import BLAS_INT_DTYPE
@@ -61,7 +66,7 @@ def compute_logistic_quantities(
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> tuple[float, int]:
+) -> float:
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     (
         eta,
@@ -161,7 +166,7 @@ def compute_logistic_quantities(
 
     dgemv(X.T, residual, modified_score)
 
-    return loglik, 0
+    return loglik
 
 
 @njit(fastmath=True, cache=True)
@@ -176,10 +181,11 @@ def newton_raphson_logistic(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, bool]:
+) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, int]:
     """
     JIT-compiled Newton-Raphson solver for Firth logistic regression.
-    Returns (beta, loglik, fisher_info_aug, max_iter, converged_yn)
+
+    Returns (beta, loglik, fisher_info_aug, max_iter, status)
     """
     (
         eta,
@@ -205,12 +211,7 @@ def newton_raphson_logistic(
     score_col = _alloc_f_order(k, 1)
     delta = np.zeros(k, dtype=np.float64)
 
-    loglik, info = compute_logistic_quantities(
-        X, y, beta, sample_weight, offset, workspace
-    )
-    if info != 0:
-        fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
-        return beta, loglik, fisher_info_aug, 0, False
+    loglik = compute_logistic_quantities(X, y, beta, sample_weight, offset, workspace)
 
     for iteration in range(1, max_iter + 1):
         fisher_info[:, :] = fisher_info_aug
@@ -233,7 +234,7 @@ def newton_raphson_logistic(
         max_score = max_abs(modified_score)
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
-            return beta, loglik, fisher_info_aug, iteration, True
+            return beta, loglik, fisher_info_aug, iteration, _STATUS_CONVERGED
 
         if max_delta > max_step:
             scale = max_step / max_delta
@@ -244,12 +245,9 @@ def newton_raphson_logistic(
         for i in range(k):
             beta_new[i] = beta[i] + delta[i]
 
-        loglik_new, info = compute_logistic_quantities(
+        loglik_new = compute_logistic_quantities(
             X, y, beta_new, sample_weight, offset, workspace
         )
-        if info != 0:
-            fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
-            return beta, loglik, fisher_info_aug, iteration, False
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -263,12 +261,9 @@ def newton_raphson_logistic(
                 for i in range(k):
                     beta_new[i] = beta[i] + step_factor * delta[i]
 
-                loglik_new, info = compute_logistic_quantities(
+                loglik_new = compute_logistic_quantities(
                     X, y, beta_new, sample_weight, offset, workspace
                 )
-                if info != 0:
-                    fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
-                    return beta, loglik, fisher_info_aug, iteration, False
 
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -279,9 +274,15 @@ def newton_raphson_logistic(
                 step_factor *= 0.5
 
             if not accepted:  # step-halving failed, return early
-                return beta, loglik, fisher_info_aug, iteration, False
+                return (
+                    beta,
+                    loglik,
+                    fisher_info_aug,
+                    iteration,
+                    _STATUS_STEP_HALVING_FAILED,
+                )
 
-    return beta, loglik, fisher_info_aug, iteration, False
+    return beta, loglik, fisher_info_aug, iteration, _STATUS_MAX_ITER
 
 
 @njit(fastmath=True, cache=True)
@@ -297,8 +298,12 @@ def constrained_lrt_1df_logistic(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> tuple[float, int, bool]:  # loglik, iteration, converged
-    """Fit constrained model with beta[idx]=0 for likelihood ratio test."""
+) -> tuple[float, int, int]:  # loglik, iteration, status
+    """
+    Fit constrained model with beta[idx]=0 for likelihood ratio test.
+
+    Returns (loglik, n_iter, status)
+    """
     (
         eta,
         p,
@@ -332,11 +337,7 @@ def constrained_lrt_1df_logistic(
             free_idx[pos] = j
             pos += 1
 
-    loglik, info = compute_logistic_quantities(
-        X, y, beta, sample_weight, offset, workspace
-    )
-    if info != 0:
-        return loglik, 0, False
+    loglik = compute_logistic_quantities(X, y, beta, sample_weight, offset, workspace)
 
     for iteration in range(1, max_iter + 1):
         for i in range(free_k):
@@ -369,7 +370,7 @@ def constrained_lrt_1df_logistic(
         max_score = max_abs(score_free)
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
-            return loglik, iteration, True
+            return loglik, iteration, _STATUS_CONVERGED
 
         if max_delta > max_step:
             scale = max_step / max_delta
@@ -382,11 +383,9 @@ def constrained_lrt_1df_logistic(
             beta_new[free_idx[i]] = beta[free_idx[i]] + delta[i]
         beta_new[idx] = 0.0
 
-        loglik_new, info = compute_logistic_quantities(
+        loglik_new = compute_logistic_quantities(
             X, y, beta_new, sample_weight, offset, workspace
         )
-        if info != 0:
-            return loglik, iteration, False
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -401,11 +400,9 @@ def constrained_lrt_1df_logistic(
                     beta_new[free_idx[i]] = beta[free_idx[i]] + step_factor * delta[i]
                 beta_new[idx] = 0.0
 
-                loglik_new, info = compute_logistic_quantities(
+                loglik_new = compute_logistic_quantities(
                     X, y, beta_new, sample_weight, offset, workspace
                 )
-                if info != 0:
-                    return loglik, iteration, False
 
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -416,9 +413,9 @@ def constrained_lrt_1df_logistic(
                 step_factor *= 0.5
 
             if not accepted:  # step-halving failed, return early
-                return loglik, iteration, False
+                return loglik, iteration, _STATUS_STEP_HALVING_FAILED
 
-    return loglik, max_iter, False
+    return loglik, max_iter, _STATUS_MAX_ITER
 
 
 @njit(fastmath=True, cache=True)
@@ -518,11 +515,9 @@ def profile_ci_bound_logistic(
     # Appendix steps 4-9: Modified Newton-Raphson
     for iteration in range(1, max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
-        loglik, info = compute_logistic_quantities(
+        loglik = compute_logistic_quantities(
             X, y, theta, sample_weight, offset, workspace
         )
-        if info != 0:
-            return theta[idx], False, iteration
 
         # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
         for i in range(k):
