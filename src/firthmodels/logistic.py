@@ -645,7 +645,13 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         if self.gtol < 0 or self.xtol < 0:
             raise ValueError("gtol and xtol must be non-negative.")
         X, y = validate_data(
-            self, X, y, dtype=np.float64, y_numeric=False, ensure_min_samples=2
+            self,
+            X,
+            y,
+            dtype=np.float64,
+            y_numeric=False,
+            ensure_min_samples=2,
+            order="C",
         )
 
         y_type = type_of_target(y)
