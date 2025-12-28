@@ -92,43 +92,30 @@ def test_compute_logistic_quantities_non_pd_symmetrizes():
         ws.numba_buffers(),
     )
 
-    assert info != 0
+    assert info == 0
     p = scipy_expit(np.zeros(n))
     w = sample_weight * p * (1.0 - p)
     XtW = X.T * np.sqrt(w)
     expected = XtW @ XtW.T
-    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-12, atol=0.0)
-    np.testing.assert_allclose(ws.fisher_info, ws.fisher_info.T, atol=0.0)
+    np.testing.assert_array_equal(ws.fisher_info, expected)
+    np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
     assert np.isneginf(loglik)
 
 
-def test_newton_raphson_numba_poison_fisher_info_on_failure():
+def test_numba_matches_numpy_on_rank_deficient():
+    """Numba and numpy backends produce same results on rank-deficient data."""
     rng = np.random.default_rng(0)
     n = 12
     x = rng.standard_normal(n)
     X = np.column_stack([x, np.zeros_like(x)])  # rank-deficient
     y = rng.integers(0, 2, n).astype(np.float64)
-    sample_weight = np.ones(n, dtype=np.float64)
-    offset = np.zeros(n, dtype=np.float64)
 
-    ws = _Workspace(n, 2)
-    beta, loglik, fisher_info, n_iter, converged = newton_raphson_logistic(
-        X,
-        y,
-        sample_weight,
-        offset,
-        max_iter=25,
-        max_step=5.0,
-        max_halfstep=25,
-        gtol=1e-4,
-        xtol=1e-4,
-        workspace=ws.numba_buffers(),
-    )
+    model_numpy = FirthLogisticRegression(backend="numpy").fit(X, y)
+    model_numba = FirthLogisticRegression(backend="numba").fit(X, y)
 
-    assert not converged
-    assert n_iter == 0
-    assert np.isnan(fisher_info).all()
-    assert np.isneginf(loglik)
+    np.testing.assert_array_equal(model_numba.coef_, model_numpy.coef_)
+    np.testing.assert_array_equal(model_numba.intercept_, model_numpy.intercept_)
+    assert model_numba.converged_ == model_numpy.converged_
 
 
 def run_both_backends(X, y, sample_weight=None, offset=None, **solver_params):
@@ -256,10 +243,9 @@ def test_numba_symmetrizes_fisher_info_on_cholesky_fail():
         X, y, beta, sample_weight, offset, ws.numba_buffers()
     )
 
-    assert info != 0
     sqrt_w = np.sqrt(sample_weight * 0.25)
     XtW = X.T * sqrt_w
     expected = XtW @ XtW.T
-    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-12, atol=0)
-    np.testing.assert_allclose(ws.fisher_info, ws.fisher_info.T, rtol=0, atol=0)
+    np.testing.assert_array_equal(ws.fisher_info, expected)
+    np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
     assert np.isneginf(loglik)

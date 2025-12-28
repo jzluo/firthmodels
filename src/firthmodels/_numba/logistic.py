@@ -110,7 +110,7 @@ def compute_logistic_quantities(
         symmetrize_lower(fisher_info)
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
-            return -np.inf, 1
+            logdet = -np.inf
         solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
     else:
         logdet = 0.0
