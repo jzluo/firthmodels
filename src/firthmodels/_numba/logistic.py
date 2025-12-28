@@ -104,32 +104,24 @@ def compute_logistic_quantities(
     # then reflect upper triangle
     dsyrk(XtW, fisher_info)
     info = dpotrf(fisher_info)
+    if info == 0:
+        logdet = 0.0
+        for i in range(k):
+            logdet += np.log(fisher_info[i, i])
+        logdet *= 2.0
+        info = dpotri(fisher_info)
+        if info == 0:
+            symmetrize_lower(fisher_info)
+            dgemm(fisher_info, XtW, solved)
+
     if info != 0:
-        # dpotrf failed and fisher_info was overwritten, so recompute
+        # dpotrf or dpotri failed; recompute fisher_info and use lstsq
         dsyrk(XtW, fisher_info)
         symmetrize_lower(fisher_info)
         sign, logdet = np.linalg.slogdet(fisher_info)
         if sign <= 0:
             logdet = -np.inf
         solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
-    else:
-        logdet = 0.0
-        for i in range(k):
-            logdet += np.log(fisher_info[i, i])
-        logdet *= 2.0
-
-        info = dpotri(fisher_info)
-        if info != 0:
-            # dpotri failed; recompute fisher_info and use lstsq
-            dsyrk(XtW, fisher_info)
-            symmetrize_lower(fisher_info)
-            sign, logdet = np.linalg.slogdet(fisher_info)
-            if sign <= 0:
-                logdet = -np.inf
-            solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
-        else:
-            symmetrize_lower(fisher_info)
-            dgemm(fisher_info, XtW, solved)
 
     # h = np.einsum("ij,ij->j", solved, XtW)
     for i in range(n):
