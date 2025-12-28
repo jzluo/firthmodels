@@ -120,11 +120,16 @@ def compute_logistic_quantities(
 
         info = dpotri(fisher_info)
         if info != 0:
-            return -np.inf, info
-
-        symmetrize_lower(fisher_info)
-
-        dgemm(fisher_info, XtW, solved)
+            # dpotri failed; recompute fisher_info and use lstsq
+            dsyrk(XtW, fisher_info)
+            symmetrize_lower(fisher_info)
+            sign, logdet = np.linalg.slogdet(fisher_info)
+            if sign <= 0:
+                logdet = -np.inf
+            solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
+        else:
+            symmetrize_lower(fisher_info)
+            dgemm(fisher_info, XtW, solved)
 
     # h = np.einsum("ij,ij->j", solved, XtW)
     for i in range(n):
@@ -217,11 +222,11 @@ def newton_raphson_logistic(
 
             info = dpotrs(fisher_info, score_col)
             if info != 0:
-                fisher_info_aug[:, :] = np.nan  # poison fisher_info_aug on failure
-                return beta, loglik, fisher_info_aug, iteration, False
-
-            for i in range(k):
-                delta[i] = score_col[i, 0]
+                # dpotrs failed, fall back to lstsq
+                delta[:] = np.linalg.lstsq(fisher_info_aug, modified_score)[0]
+            else:
+                for i in range(k):
+                    delta[i] = score_col[i, 0]
 
         max_score = max_abs(modified_score)
         max_delta = max_abs(delta)
@@ -341,24 +346,22 @@ def constrained_lrt_1df_logistic(
                 fisher_free[i, j] = fisher_info_aug[ii, jj]
 
         info = dpotrf(fisher_free)
+        if info == 0:
+            for i in range(free_k):
+                score_col[i, 0] = score_free[i]
+            info = dpotrs(fisher_free, score_col)
+            if info == 0:
+                for i in range(free_k):
+                    delta[i] = score_col[i, 0]
+
         if info != 0:
-            # Recompute fisher_free since dpotrf overwrote it
+            # dpotrf or dpotrs failed; recompute fisher_free and use lstsq
             for i in range(free_k):
                 ii = free_idx[i]
                 for j in range(free_k):
                     jj = free_idx[j]
                     fisher_free[i, j] = fisher_info_aug[ii, jj]
             delta[:] = np.linalg.lstsq(fisher_free, score_free)[0]
-        else:
-            for i in range(free_k):
-                score_col[i, 0] = score_free[i]
-
-            info = dpotrs(fisher_free, score_col)
-            if info != 0:
-                return loglik, iteration, False
-
-            for i in range(free_k):
-                delta[i] = score_col[i, 0]
 
         max_score = max_abs(score_free)
         max_delta = max_abs(delta)
@@ -544,22 +547,29 @@ def profile_ci_bound_logistic(
             ipiv[i] = 0
 
         info = dgetrf(G, ipiv)
+        if info == 0:
+            # Solve G * [v, g_j] = [F, e_idx] without forming G^-1.
+            for i in range(k):
+                rhs[i, 0] = F[i]
+                rhs[i, 1] = 0.0
+            rhs[idx, 1] = 1.0
+            info = dgetrs(G, ipiv, rhs)
+            if info == 0:
+                for i in range(k):
+                    v[i] = rhs[i, 0]
+                    g_j[i] = rhs[i, 1]
+
         if info != 0:
-            return theta[idx], False, iteration
-
-        # Solve G * [v, g_j] = [F, e_idx] without forming G^-1.
-        for i in range(k):
-            rhs[i, 0] = F[i]
-            rhs[i, 1] = 0.0
-        rhs[idx, 1] = 1.0
-
-        info = dgetrs(G, ipiv, rhs)
-        if info != 0:
-            return theta[idx], False, iteration
-
-        for i in range(k):
-            v[i] = rhs[i, 0]
-            g_j[i] = rhs[i, 1]
+            # dgetrf or dgetrs failed; reconstruct G from D and use lstsq
+            for i in range(k):
+                for j in range(k):
+                    G[i, j] = D[i, j]
+            for j in range(k):
+                G[idx, j] = modified_score[j]
+            v[:] = np.linalg.lstsq(G, F)[0]
+            e_idx_vec = np.zeros(k, dtype=np.float64)
+            e_idx_vec[idx] = 1.0
+            g_j[:] = np.linalg.lstsq(G, e_idx_vec)[0]
 
         # Appendix step 7: quadratic correction
         # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)

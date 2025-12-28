@@ -97,7 +97,7 @@ def test_compute_logistic_quantities_non_pd_symmetrizes():
     w = sample_weight * p * (1.0 - p)
     XtW = X.T * np.sqrt(w)
     expected = XtW @ XtW.T
-    np.testing.assert_array_equal(ws.fisher_info, expected)
+    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-14)
     np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
     assert np.isneginf(loglik)
 
@@ -113,8 +113,10 @@ def test_numba_matches_numpy_on_rank_deficient():
     model_numpy = FirthLogisticRegression(backend="numpy").fit(X, y)
     model_numba = FirthLogisticRegression(backend="numba").fit(X, y)
 
-    np.testing.assert_array_equal(model_numba.coef_, model_numpy.coef_)
-    np.testing.assert_array_equal(model_numba.intercept_, model_numpy.intercept_)
+    np.testing.assert_allclose(model_numba.coef_, model_numpy.coef_, rtol=1e-14)
+    np.testing.assert_allclose(
+        model_numba.intercept_, model_numpy.intercept_, rtol=1e-14
+    )
     assert model_numba.converged_ == model_numpy.converged_
 
 
@@ -246,6 +248,6 @@ def test_numba_symmetrizes_fisher_info_on_cholesky_fail():
     sqrt_w = np.sqrt(sample_weight * 0.25)
     XtW = X.T * sqrt_w
     expected = XtW @ XtW.T
-    np.testing.assert_array_equal(ws.fisher_info, expected)
+    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-14)
     np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
     assert np.isneginf(loglik)
