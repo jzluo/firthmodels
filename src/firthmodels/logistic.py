@@ -385,7 +385,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
             )
-            chi2 = 2 * (self.loglik_ - loglik_constrained)
+            chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
             pvalue = scipy.stats.chi2.sf(chi2, df=1)
             #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
             bse = abs(beta_hat_full[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
