@@ -3,6 +3,8 @@ import pytest
 
 from firthmodels import NUMBA_AVAILABLE
 
+pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available")
+
 if NUMBA_AVAILABLE:
     from firthmodels._numba.linalg import (
         dgemm,
