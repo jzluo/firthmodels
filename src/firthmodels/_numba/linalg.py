@@ -1,3 +1,15 @@
+"""
+Linear algebra routines and BLAS/LAPACK wrappers for Numba.
+
+Numba can't call scipy's BLAS/LAPACK wrappers directly in nopython mode, so we:
+1. Register function pointers from scipy's Cython modules with llvmlite.
+2. Define @intrinsic functions that emit LLVM calls to those symbols with Fortran-style ABI
+   (ie all args passed by pointers)
+3. Wrap the intrinsics in @njit functions with the expected signatures.
+
+These wrappers can then be cached and inlined into higher-level Numba functions.
+"""
+
 import numpy as np
 from llvmlite import binding as ll
 from llvmlite import ir
@@ -11,12 +23,14 @@ from firthmodels._blas_abi import BLAS_FLAG_DTYPE, BLAS_INT_DTYPE
 
 @njit(inline="always", cache=True)
 def _alloc_f_order(rows: int, cols: int) -> NDArray[np.float64]:
+    """Allocate F-contiguous array"""
     temp = np.empty((cols, rows), dtype=np.float64)
     return temp.T
 
 
 @njit(inline="always", cache=True)
 def symmetrize_lower(A: NDArray[np.float64]) -> None:
+    """Copy lower triangle to upper, making A symmetric in-place."""
     n = A.shape[0]
     for j in range(1, n):
         for i in range(j):
@@ -40,6 +54,7 @@ for symbol, (module, name) in _SYMBOLS.items():
 
 
 def _external_call_codegen(symbol_name, context, builder, signature, args):
+    """Emit LLVM call to a registered BLAS/LAPACK symbol using array data pointers."""
     ptrs = []
     for arg_type, arg in zip(signature.args, args):
         arr = context.make_array(arg_type)(context, builder, arg)
@@ -144,6 +159,7 @@ def _dgetrs_call(typingctx, trans, n, nrhs, A, lda, ipiv, B, ldb, info):
 
 @njit(cache=True)
 def dsyrk(A: np.ndarray, C: np.ndarray) -> None:
+    """C = A @ A.T (lower triangle only). Overwrites C."""
     k = A.shape[0]
     n = A.shape[1]
 
@@ -161,6 +177,7 @@ def dsyrk(A: np.ndarray, C: np.ndarray) -> None:
 
 @njit(cache=True)
 def dgemm(A: np.ndarray, B: np.ndarray, C: np.ndarray) -> None:
+    """C = A @ B"""
     m = A.shape[0]
     k = A.shape[1]
     n = B.shape[1]
@@ -183,6 +200,7 @@ def dgemm(A: np.ndarray, B: np.ndarray, C: np.ndarray) -> None:
 
 @njit(cache=True)
 def dgemv(A: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
+    """y = A @ x"""
     m = A.shape[0]
     n = A.shape[1]
     trans = np.array([ord("N")], dtype=BLAS_FLAG_DTYPE)
@@ -199,6 +217,7 @@ def dgemv(A: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
 
 @njit(cache=True)
 def dpotrf(A: np.ndarray) -> int:
+    """Cholesky: A = L @ L.T in-place (lower). Returns 0 on success."""
     n = A.shape[0]
     uplo = np.array([ord("L")], dtype=BLAS_FLAG_DTYPE)
     n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
@@ -211,6 +230,7 @@ def dpotrf(A: np.ndarray) -> int:
 
 @njit(cache=True)
 def dpotri(L: np.ndarray) -> int:
+    """Invert from Cholesky factor in-place (lower). Returns 0 on success."""
     n = L.shape[0]
     uplo = np.array([ord("L")], dtype=BLAS_FLAG_DTYPE)
     n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
@@ -223,6 +243,7 @@ def dpotri(L: np.ndarray) -> int:
 
 @njit(cache=True)
 def dpotrs(L: np.ndarray, B: np.ndarray) -> int:
+    """Solve L @ L.T @ X = B using Cholesky factor. B overwritten with X. Returns 0 on success."""
     n = L.shape[0]
     nrhs = B.shape[1]
     uplo = np.array([ord("L")], dtype=BLAS_FLAG_DTYPE)
@@ -238,6 +259,7 @@ def dpotrs(L: np.ndarray, B: np.ndarray) -> int:
 
 @njit(cache=True)
 def dgetrf(A: np.ndarray, ipiv: np.ndarray) -> int:
+    """LU factorization with pivoting. Overwrites A, pivots in ipiv. Returns 0 on success."""
     m = A.shape[0]
     n = A.shape[1]
     m_arr = np.array([m], dtype=BLAS_INT_DTYPE)
@@ -251,6 +273,7 @@ def dgetrf(A: np.ndarray, ipiv: np.ndarray) -> int:
 
 @njit(cache=True)
 def dgetri(A: np.ndarray, ipiv: np.ndarray, work: np.ndarray) -> int:
+    """Invert from LU factors in-place. Returns 0 on success."""
     n = A.shape[0]
     n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
     lda = np.array([n], dtype=BLAS_INT_DTYPE)
@@ -263,6 +286,7 @@ def dgetri(A: np.ndarray, ipiv: np.ndarray, work: np.ndarray) -> int:
 
 @njit(cache=True)
 def dgetrs(A: np.ndarray, ipiv: np.ndarray, B: np.ndarray) -> int:
+    """Solve A @ X = B using LU factors. B overwritten with X. Returns 0 on success."""
     n = A.shape[0]
     nrhs = B.shape[1]
     trans = np.array([ord("N")], dtype=BLAS_FLAG_DTYPE)

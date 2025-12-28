@@ -1,3 +1,10 @@
+"""
+Numba-accelerated Firth logistic regression.
+
+JIT-compiled versions of the numpy/scipy implementations in src/firthmodels/logistic.py
+and src/firthmodels/_solvers.py.
+"""
+
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
@@ -55,6 +62,7 @@ def compute_logistic_quantities(
     offset: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
 ) -> tuple[float, int]:
+    """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     (
         eta,
         p,
@@ -168,9 +176,11 @@ def newton_raphson_logistic(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> tuple[
-    NDArray[np.float64], float, NDArray[np.float64], int, bool
-]:  # beta, loglik, fisher_info_aug, max_iter, converge_yn
+) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, bool]:
+    """
+    JIT-compiled Newton-Raphson solver for Firth logistic regression.
+    Returns (beta, loglik, fisher_info_aug, max_iter, converged_yn)
+    """
     (
         eta,
         p,
@@ -288,6 +298,7 @@ def constrained_lrt_1df_logistic(
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
 ) -> tuple[float, int, bool]:  # loglik, iteration, converged
+    """Fit constrained model with beta[idx]=0 for likelihood ratio test."""
     (
         eta,
         p,
@@ -426,6 +437,7 @@ def profile_ci_bound_logistic(
     D0: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
 ) -> tuple[float, bool, int]:  # bound, converged, iter
+    """Compute one profile likelihood CI bound using Venzon-Moolgavkar algorithm."""
     (
         eta,
         p,
