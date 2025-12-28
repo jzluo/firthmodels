@@ -729,7 +729,7 @@ class _Workspace:
         "XtW_aug",
         "fisher_info_aug",
         "residual",
-        "temp_k",
+        "temp_k",  # note - this is used as a buffer in numpy, and as modified_score in numba
     )
 
     def __init__(self, n: int, k: int) -> None:

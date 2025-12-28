@@ -7,11 +7,6 @@ and src/firthmodels/_solvers.py.
 
 import numpy as np
 from numba import njit
-
-# Solver exit status codes
-_STATUS_CONVERGED = 0
-_STATUS_STEP_HALVING_FAILED = 1
-_STATUS_MAX_ITER = 2
 from numpy.typing import NDArray
 
 from firthmodels._blas_abi import BLAS_INT_DTYPE
@@ -27,6 +22,11 @@ from firthmodels._numba.linalg import (
     dsyrk,
     symmetrize_lower,
 )
+
+# Solver exit status codes
+_STATUS_CONVERGED = 0
+_STATUS_STEP_HALVING_FAILED = 1
+_STATUS_MAX_ITER = 2
 
 
 @njit(fastmath=True, cache=True)
@@ -45,7 +45,7 @@ def log1pexp(x: float) -> float:
     return np.log1p(np.exp(x))
 
 
-@njit(cache=True, fastmath=False)
+@njit(fastmath=False, cache=True)
 def max_abs(vec: NDArray[np.float64]) -> float:
     max_val = 0.0
     for i in range(vec.shape[0]):
