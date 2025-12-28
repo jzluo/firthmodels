@@ -14,7 +14,7 @@ class TestFirthLogisticRegression:
     def test_matches_logistf_with_separation(self, separation_data):
         """Matches logistf on quasi-separated data."""
         X, y = separation_data
-        model = FirthLogisticRegression()
+        model = FirthLogisticRegression(backend="numpy")
         model.fit(X, y)
         model.lrt()
         ci = model.conf_int(alpha=0.05, method="pl")
@@ -65,7 +65,7 @@ class TestFirthLogisticRegression:
         """Fits without intercept."""
         X, y = separation_data
         n_features = X.shape[1]
-        model = FirthLogisticRegression(fit_intercept=False)
+        model = FirthLogisticRegression(fit_intercept=False, backend="numpy")
         model.fit(X, y)
 
         assert model.intercept_ == 0.0
@@ -78,13 +78,14 @@ class TestFirthLogisticRegression:
 
         for labels in [(0, 1), (1, 2), (-1, 1)]:
             y = rng.choice(labels, 50)
-            model = FirthLogisticRegression()
+            model = FirthLogisticRegression(backend="numpy")
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
 
     @pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
     @pytest.mark.filterwarnings(
-        "ignore:invalid value encountered in sqrt:RuntimeWarning"
+        "ignore:invalid value encountered in sqrt:RuntimeWarning",
+        "ignore:Fisher information matrix is not finite:RuntimeWarning",
     )
     def test_sklearn_compatible(self):
         """Passes sklearn's estimator checks."""
@@ -99,7 +100,7 @@ class TestFirthLogisticRegression:
     def test_lrt_computes_on_demand(self, separation_data):
         """lrt() computes only requested features and accumulates results."""
         X, y = separation_data
-        model = FirthLogisticRegression()
+        model = FirthLogisticRegression(backend="numpy")
         model.fit(X, y)
 
         # After lrt(1), only index 1 should be populated
@@ -120,14 +121,14 @@ class TestFirthLogisticRegression:
         X = np.array([[0], [0], [0], [1], [1], [1]], dtype=float)
         y = np.array([0, 0, 0, 1, 1, 1])
 
-        model = FirthLogisticRegression(max_halfstep=0)
+        model = FirthLogisticRegression(max_halfstep=0, backend="numpy")
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             model.fit(X, y)
 
     def test_lrt_with_string_feature_names(self, separation_data_df):
         X, y = separation_data_df
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         # Test single string
         model.lrt("x1")
@@ -147,7 +148,7 @@ class TestFirthLogisticRegression:
 
     def test_lrt_intercept_by_name(self, separation_data_df):
         X, y = separation_data_df
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         model.lrt("intercept")
         assert np.all(np.isnan(model.lrt_pvalues_[:-1]))
@@ -155,21 +156,21 @@ class TestFirthLogisticRegression:
 
     def test_lrt_intercept_raises_when_no_intercept(self, separation_data):
         X, y = separation_data
-        model = FirthLogisticRegression(fit_intercept=False).fit(X, y)
+        model = FirthLogisticRegression(fit_intercept=False, backend="numpy").fit(X, y)
 
         with pytest.raises(ValueError, match="Model has no intercept"):
             model.lrt("intercept")
 
     def test_lrt_string_raises_without_feature_names(self, separation_data):
         X, y = separation_data
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         with pytest.raises(ValueError, match="No feature names available"):
             model.lrt("x1")
 
     def test_lrt_unknown_feature_raises(self, separation_data_df):
         X, y = separation_data_df
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         with pytest.raises(KeyError, match="Unknown feature"):
             model.lrt("nonexistent")
@@ -181,13 +182,13 @@ class TestFirthLogisticRegression:
         import scipy.linalg
 
         X, y = separation_data
-        model_normal = FirthLogisticRegression().fit(X, y)
+        model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         def fake_dpotrf(*args, **kwargs):
             raise scipy.linalg.LinAlgError("forced failure")
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
-        model_fallback = FirthLogisticRegression().fit(X, y)
+        model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
         np.testing.assert_allclose(
@@ -197,13 +198,13 @@ class TestFirthLogisticRegression:
     def test_cholesky_fallback_in_solver(self, separation_data, monkeypatch):
         """Fallback to lstsq in newton_raphson solver produces equivalent results."""
         X, y = separation_data
-        model_normal = FirthLogisticRegression().fit(X, y)
+        model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         def fake_dpotrf(*args, **kwargs):
             raise scipy.linalg.LinAlgError("forced failure")
 
         monkeypatch.setattr("firthmodels._solvers.dpotrf", fake_dpotrf)
-        model_fallback = FirthLogisticRegression().fit(X, y)
+        model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
 
         np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
         np.testing.assert_allclose(
@@ -213,14 +214,14 @@ class TestFirthLogisticRegression:
     def test_profile_ci_solve_fallback(self, separation_data, monkeypatch):
         """Fallback to lstsq in profile CI initialization produces equivalent results."""
         X, y = separation_data
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
         ci_normal = model.conf_int(method="pl", features=[0])
 
         def fake_solve(*args, **kwargs):
             raise np.linalg.LinAlgError("forced failure")
 
         monkeypatch.setattr("numpy.linalg.solve", fake_solve)
-        model2 = FirthLogisticRegression().fit(X, y)
+        model2 = FirthLogisticRegression(backend="numpy").fit(X, y)
         ci_fallback = model2.conf_int(method="pl", features=[0])
 
         np.testing.assert_allclose(ci_fallback, ci_normal, rtol=1e-6)
@@ -228,14 +229,14 @@ class TestFirthLogisticRegression:
     def test_profile_ci_inv_fallback(self, separation_data, monkeypatch):
         """Fallback to lstsq/pinv in profile CI iteration produces equivalent results."""
         X, y = separation_data
-        model = FirthLogisticRegression().fit(X, y)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
         ci_normal = model.conf_int(method="pl", features=[0])
 
         def fake_dgetrf(*args, **kwargs):
             raise np.linalg.LinAlgError("forced failure")
 
         monkeypatch.setattr("firthmodels._profile_ci.dgetrf", fake_dgetrf)
-        model2 = FirthLogisticRegression().fit(X, y)
+        model2 = FirthLogisticRegression(backend="numpy").fit(X, y)
         ci_fallback = model2.conf_int(method="pl", features=[0])
 
         np.testing.assert_allclose(ci_fallback, ci_normal, rtol=1e-6)

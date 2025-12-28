@@ -1,3 +1,4 @@
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Literal, Self, Sequence, cast
@@ -18,10 +19,22 @@ from sklearn.utils.validation import (
     validate_data,
 )
 
-from firthmodels._lrt import constrained_lrt_1df
-from firthmodels._profile_ci import profile_ci_bound
+from firthmodels import NUMBA_AVAILABLE
+
+if NUMBA_AVAILABLE:
+    from firthmodels._numba.logistic import (
+        _STATUS_CONVERGED,
+        _STATUS_MAX_ITER,
+        _STATUS_STEP_HALVING_FAILED,
+        constrained_lrt_1df_logistic,
+        newton_raphson_logistic,
+        profile_ci_bound_logistic,
+    )
+
+from firthmodels._lrt import LRTResult, constrained_lrt_1df
+from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import resolve_feature_indices
+from firthmodels._utils import FirthResult, resolve_feature_indices
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -37,6 +50,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     Parameters
     ----------
+    backend : {'auto', 'numba', 'numpy'}, default='auto'
+        Computational backend to use.
+        - 'auto': uses the Numba implementation when available, otherwise falls back to
+          the NumPy/SciPy path.
+        - 'numba': forces the Numba backend (raises ImportError if Numba isn't installed).
+        - 'numpy': forces the NumPy/SciPy implementation.
     solver : {'newton-raphson'}, default='newton-raphson'
         Optimization algorithm. Only 'newton-raphson' is currently supported.
     max_iter : int, default=25
@@ -109,6 +128,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
     def __init__(
         self,
+        backend: Literal["auto", "numba", "numpy"] = "auto",
         solver: Literal["newton-raphson"] = "newton-raphson",
         max_iter: int = 25,
         max_step: float = 5.0,
@@ -124,12 +144,26 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.gtol = gtol
         self.xtol = xtol
         self.fit_intercept = fit_intercept
+        self.backend = backend
 
     def __sklearn_tags__(self) -> Tags:
         tags = super().__sklearn_tags__()
         tags.classifier_tags = ClassifierTags()
         tags.classifier_tags.multi_class = False
         return tags
+
+    def _resolve_backend(self) -> Literal["numba", "numpy"]:
+        if self.backend == "auto":
+            return "numba" if NUMBA_AVAILABLE else "numpy"
+        if self.backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
+            return "numba"
+        if self.backend == "numpy":
+            return "numpy"
+        raise ValueError(
+            f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
+        )
 
     def fit(
         self,
@@ -189,25 +223,59 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         # pre-allocate workspace arrays to reduce allocations
         workspace = _Workspace(n=X.shape[0], k=n_features)
 
-        def compute_quantities(beta):
-            return compute_logistic_quantities(
+        if self._resolve_backend() == "numba":
+            beta, loglik, fisher_info, n_iter, status = newton_raphson_logistic(
                 X=X,
                 y=y,
-                beta=beta,
                 sample_weight=sample_weight,
                 offset=offset,
-                workspace=workspace,
+                workspace=workspace.numba_buffers(),
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
             )
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            result = FirthResult(
+                beta=beta,
+                loglik=loglik,
+                fisher_info=fisher_info,
+                n_iter=n_iter,
+                converged=(status == _STATUS_CONVERGED),
+            )
+        else:
 
-        result = newton_raphson(
-            compute_quantities=compute_quantities,
-            n_features=n_features,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            def compute_quantities(beta):
+                return compute_logistic_quantities(
+                    X=X,
+                    y=y,
+                    beta=beta,
+                    sample_weight=sample_weight,
+                    offset=offset,
+                    workspace=workspace,
+                )
+
+            result = newton_raphson(
+                compute_quantities=compute_quantities,
+                n_features=n_features,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
 
         # === Extract coefficients ===
         if self.fit_intercept:
@@ -222,11 +290,20 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.converged_ = result.converged
 
         # === Wald ===
-        try:
-            cov = np.linalg.inv(result.fisher_info)
-            bse = np.sqrt(np.diag(cov))
-        except np.linalg.LinAlgError:
+        if not np.all(np.isfinite(result.fisher_info)):
+            warnings.warn(
+                "Fisher information matrix is not finite; "
+                "standard errors and p-values cannot be computed.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             bse = np.full_like(result.beta, np.nan)
+        else:
+            try:
+                cov = np.linalg.inv(result.fisher_info)
+                bse = np.sqrt(np.diag(cov))
+            except np.linalg.LinAlgError:
+                bse = np.full_like(result.beta, np.nan)
 
         z = result.beta / bse
         pvalues = 2 * scipy.stats.norm.sf(np.abs(z))
@@ -249,6 +326,128 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         self._workspace = workspace
         return self
+
+    def lrt(
+        self,
+        features: int | str | Sequence[int | str] | None = None,
+    ) -> Self:
+        """
+        Compute penalized likelihood ratio test p-values.
+        Standard errors are also back-corrected using the effect size estimate and the
+        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
+        by 1/SE².
+
+        Parameters
+        ----------
+        features : int, str, sequence of int, sequence of str, or None, default=None
+            Features to test. If None, test all features.
+            - int: single feature by index
+            - str: single feature by name (requires `feature_names_in`)
+            - Sequence[int]: multiple features by index
+            - Sequence[str]: multiple features by name
+            - None: all features (including intercept if `fit_intercept=True`)
+
+        Returns
+        -------
+        self : FirthLogisticRegression
+
+        Examples
+        --------
+        >>> model.fit(X, y).lrt()  # compute LR for all features
+        >>> model.lrt_pvalues_
+        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
+        >>> model.lrt_bse_
+        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
+        >>> model.fit(X, y).lrt(0)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan,        nan,        nan])
+        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
+        >>> model.lrt_pvalues_
+        array([0.00020841,        nan, 0.02363857,        nan])
+        """
+        check_is_fitted(self)
+        indices = self._resolve_feature_indices(features)
+
+        # compute LRT
+        for idx in indices:
+            if np.isnan(self.lrt_pvalues_[idx]):
+                self._compute_single_lrt(idx)
+        return self
+
+    def _compute_single_lrt(self, idx: int) -> None:
+        """
+        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
+        back-corrected standard error.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the coefficient to test. Use len(coef_) for the intercept.
+        """
+        X, y, sample_weight, offset = self._fit_data
+
+        if self.fit_intercept:
+            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
+        else:
+            beta_hat_full = self.coef_
+
+        if self._resolve_backend() == "numba":
+            loglik_constrained, n_iter, status = constrained_lrt_1df_logistic(
+                X=X,
+                y=y,
+                sample_weight=sample_weight,
+                offset=offset,
+                idx=idx,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=self._workspace.numba_buffers(),
+            )
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=3,
+                )
+            chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
+            pvalue = scipy.stats.chi2.sf(chi2, df=1)
+            #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
+            bse = abs(beta_hat_full[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
+            result = LRTResult(chi2=chi2, pvalue=pvalue, bse_backcorrected=bse)
+        else:
+
+            def compute_quantities_full(beta):
+                return compute_logistic_quantities(
+                    X=X,
+                    y=y,
+                    beta=beta,
+                    sample_weight=sample_weight,
+                    offset=offset,
+                    workspace=self._workspace,
+                )
+
+            result = constrained_lrt_1df(
+                idx=idx,
+                beta_hat_full=beta_hat_full,
+                loglik_full=self.loglik_,
+                compute_quantities_full=compute_quantities_full,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
+
+        self.lrt_pvalues_[idx] = result.pvalue
+        self.lrt_bse_[idx] = result.bse_backcorrected
 
     def conf_int(
         self,
@@ -354,17 +553,40 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
-                        result = profile_ci_bound(
-                            idx=idx,
-                            theta_hat=theta_hat,
-                            l_star=l_star,
-                            which=which,
-                            max_iter=max_iter,
-                            tol=tol,
-                            chi2_crit=chi2_crit,
-                            compute_quantities_full=compute_quantities_full,
-                            D0=D0,
-                        )
+                        if self._resolve_backend() == "numba":
+                            bound, converged, iterations = profile_ci_bound_logistic(
+                                X=X,
+                                y=y,
+                                sample_weight=sample_weight,
+                                offset=offset,
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                chi2_crit=chi2_crit,
+                                max_iter=max_iter,
+                                tol=tol,
+                                D0=D0,
+                                workspace=self._workspace.numba_buffers(),
+                            )
+                            result = ProfileCIBoundResult(
+                                bound=bound,
+                                converged=converged,
+                                n_iter=iterations,
+                            )
+
+                        else:
+                            result = profile_ci_bound(
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                max_iter=max_iter,
+                                tol=tol,
+                                chi2_crit=chi2_crit,
+                                compute_quantities_full=compute_quantities_full,
+                                D0=D0,
+                            )
 
                         if result.converged:
                             ci[idx, bound_idx] = result.bound
@@ -381,95 +603,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         else:
             raise ValueError(f"method must be 'wald' or 'pl', got '{method}'")
-
-    def lrt(
-        self,
-        features: int | str | Sequence[int | str] | None = None,
-    ) -> Self:
-        """
-        Compute penalized likelihood ratio test p-values.
-        Standard errors are also back-corrected using the effect size estimate and the
-        LRT p-value, as in regenie. Useful for meta-analysis where studies are weighted
-        by 1/SE².
-
-        Parameters
-        ----------
-        features : int, str, sequence of int, sequence of str, or None, default=None
-            Features to test. If None, test all features.
-            - int: single feature by index
-            - str: single feature by name (requires `feature_names_in`)
-            - Sequence[int]: multiple features by index
-            - Sequence[str]: multiple features by name
-            - None: all features (including intercept if `fit_intercept=True`)
-
-        Returns
-        -------
-        self : FirthLogisticRegression
-
-        Examples
-        --------
-        >>> model.fit(X, y).lrt()  # compute LR for all features
-        >>> model.lrt_pvalues_
-        array([0.00020841, 0.00931731, 0.02363857, 0.0055888 ])
-        >>> model.lrt_bse_
-        array([0.98628022, 0.25997282, 0.38149783, 0.12218733])
-        >>> model.fit(X, y).lrt(0)
-        >>> model.lrt_pvalues_
-        array([0.00020841,        nan,        nan,        nan])
-        >>> model.fit(X, y).lrt(['snp', 'age'])  # by name (requires DataFrame input)
-        >>> model.lrt_pvalues_
-        array([0.00020841,        nan, 0.02363857,        nan])
-        """
-        check_is_fitted(self)
-        indices = self._resolve_feature_indices(features)
-
-        # compute LRT
-        for idx in indices:
-            if np.isnan(self.lrt_pvalues_[idx]):
-                self._compute_single_lrt(idx)
-        return self
-
-    def _compute_single_lrt(self, idx: int) -> None:
-        """
-        Fit constrained model with `beta[idx]=0` and compute LRT p-value and
-        back-corrected standard error.
-
-        Parameters
-        ----------
-        idx : int
-            Index of the coefficient to test. Use len(coef_) for the intercept.
-        """
-        X, y, sample_weight, offset = self._fit_data
-
-        def compute_quantities_full(beta):
-            return compute_logistic_quantities(
-                X=X,
-                y=y,
-                beta=beta,
-                sample_weight=sample_weight,
-                offset=offset,
-                workspace=self._workspace,
-            )
-
-        if self.fit_intercept:
-            beta_hat_full = np.concatenate([self.coef_, [self.intercept_]])
-        else:
-            beta_hat_full = self.coef_
-
-        result = constrained_lrt_1df(
-            idx=idx,
-            beta_hat_full=beta_hat_full,
-            loglik_full=self.loglik_,
-            compute_quantities_full=compute_quantities_full,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
-
-        self.lrt_pvalues_[idx] = result.pvalue
-        self.lrt_bse_[idx] = result.bse_backcorrected
 
     def _resolve_feature_indices(
         self,
@@ -538,7 +671,13 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         if self.gtol < 0 or self.xtol < 0:
             raise ValueError("gtol and xtol must be non-negative.")
         X, y = validate_data(
-            self, X, y, dtype=np.float64, y_numeric=False, ensure_min_samples=2
+            self,
+            X,
+            y,
+            dtype=np.float64,
+            y_numeric=False,
+            ensure_min_samples=2,
+            order="C",
         )
 
         y_type = type_of_target(y)
@@ -590,7 +729,7 @@ class _Workspace:
         "XtW_aug",
         "fisher_info_aug",
         "residual",
-        "temp_k",
+        "temp_k",  # note - this is used as a buffer in numpy, and as modified_score in numba
     )
 
     def __init__(self, n: int, k: int) -> None:
@@ -609,6 +748,24 @@ class _Workspace:
         self.fisher_info_aug = np.empty((k, k), dtype=np.float64, order="F")
         self.residual = np.empty(n, dtype=np.float64)
         self.temp_k = np.empty(k, dtype=np.float64)
+
+    def numba_buffers(self):  # for numba
+        return (
+            self.eta,
+            self.p,
+            self.w,
+            self.sqrt_w,
+            self.XtW,
+            self.fisher_info,
+            self.solved,
+            self.h,
+            self.w_aug,
+            self.sqrt_w_aug,
+            self.XtW_aug,
+            self.fisher_info_aug,
+            self.residual,
+            self.temp_k,  # used as modified_score
+        )
 
 
 def compute_logistic_quantities(

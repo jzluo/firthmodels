@@ -71,7 +71,7 @@ jobs:
               --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
               --index-strategy unsafe-best-match \
-              "firthmodels==$VERSION"; then
+              "firthmodels[formula,numba]==$VERSION"; then
               exit 0
             fi
             echo "Attempt $i failed, waiting 10s..."
@@ -83,7 +83,7 @@ jobs:
       - name: Verify import and run tests
         run: |
           python -c "from firthmodels import FirthLogisticRegression; print('Import OK')"
-          uv pip install --system pytest pandas formulaic
+          uv pip install --system pytest pandas
           pytest tests/
 
   publish-pypi:
