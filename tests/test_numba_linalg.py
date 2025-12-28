@@ -18,7 +18,7 @@ if NUMBA_AVAILABLE:
         dsyrk,
     )
 
-from firthmodels._blas_abi import BLAS_INT_DTYPE
+from firthmodels._numba.blas_abi import BLAS_INT_DTYPE
 
 
 class TestBLAS:

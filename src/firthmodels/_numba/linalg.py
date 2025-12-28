@@ -18,7 +18,7 @@ from numba.core import cgutils, types
 from numba.extending import get_cython_function_address, intrinsic
 from numpy.typing import NDArray
 
-from firthmodels._blas_abi import BLAS_FLAG_DTYPE, BLAS_INT_DTYPE
+from firthmodels._numba.blas_abi import BLAS_FLAG_DTYPE, BLAS_INT_DTYPE
 
 
 @njit(inline="always", cache=True)

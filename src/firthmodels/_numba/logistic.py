@@ -9,7 +9,7 @@ import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 
-from firthmodels._blas_abi import BLAS_INT_DTYPE
+from firthmodels._numba.blas_abi import BLAS_INT_DTYPE
 from firthmodels._numba.linalg import (
     _alloc_f_order,
     dgemm,

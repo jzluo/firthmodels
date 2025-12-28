@@ -130,6 +130,7 @@ numba = [
 dev = [
     { name = "formulaic" },
     { name = "mypy" },
+    { name = "numba" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -150,6 +151,7 @@ provides-extras = ["formula", "numba"]
 dev = [
     { name = "formulaic", specifier = ">=1.2.1" },
     { name = "mypy", specifier = ">=1.19.0" },
+    { name = "numba", specifier = ">=0.63" },
     { name = "pandas", specifier = ">=1.5.3" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
