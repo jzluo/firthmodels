@@ -553,7 +553,7 @@ class _CoxPrecomputed:
 
         # Compute per-block event counts and covariate sums
         n_blocks = len(block_ends)
-        block_d = np.zeros(n_blocks, dtype=np.intp)
+        block_d = np.zeros(n_blocks, dtype=np.int64)
         block_s = np.zeros((n_blocks, k), dtype=np.float64)
 
         start = 0

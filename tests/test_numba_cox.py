@@ -4,7 +4,7 @@ import pytest
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.logistic import precompute_cox
+    from firthmodels._numba.cox import precompute_cox
 
 
 pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available")
