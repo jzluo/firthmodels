@@ -12,6 +12,7 @@ from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
 
+from firthmodels import NUMBA_AVAILABLE
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
@@ -24,6 +25,12 @@ class FirthCoxPH(BaseEstimator):
 
     Parameters
     ----------
+    backend : {'auto', 'numba', 'numpy'}, default='auto'
+        Computational backend to use.
+        - 'auto': uses the Numba implementation when available, otherwise falls back to
+          the NumPy/SciPy path.
+        - 'numba': forces the Numba backend (raises ImportError if Numba isn't installed).
+        - 'numpy': forces the NumPy/SciPy implementation.
     max_iter : int, default=50
         Maximum number of Newton-Raphson iterations.
     max_step : float, default=5.0
@@ -74,17 +81,32 @@ class FirthCoxPH(BaseEstimator):
 
     def __init__(
         self,
+        backend: Literal["auto", "numba", "numpy"] = "auto",
         max_iter: int = 50,
         max_step: float = 5.0,
         max_halfstep: int = 5,
         gtol: float = 1e-4,
         xtol: float = 1e-6,
     ) -> None:
+        self.backend = backend
         self.max_iter = max_iter
         self.max_step = max_step
         self.max_halfstep = max_halfstep
         self.gtol = gtol
         self.xtol = xtol
+
+    def _resolve_backend(self) -> Literal["numba", "numpy"]:
+        if self.backend == "auto":
+            return "numba" if NUMBA_AVAILABLE else "numpy"
+        if self.backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
+            return "numba"
+        if self.backend == "numpy":
+            return "numpy"
+        raise ValueError(
+            f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
+        )
 
     def fit(self, X: ArrayLike, y: ArrayLike) -> Self:
         """
