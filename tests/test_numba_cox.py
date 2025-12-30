@@ -117,17 +117,17 @@ class TestFirthCoxPH:
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
         np.testing.assert_allclose(lr_stat, expected_lr, rtol=1e-6)
 
-        # # LRT p-values
-        # model.lrt()
-        # expected_lrt_pvalues = np.array(
-        #     [
-        #         7.318984974e-09,  # separator
-        #         1.686334002e-04,  # x1
-        #         9.295083722e-02,  # x2
-        #         8.463066114e-04,  # x3
-        #     ]
-        # )
-        # np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-6)
+        # LRT p-values
+        model.lrt()
+        expected_lrt_pvalues = np.array(
+            [
+                7.318984974e-09,  # separator
+                1.686334002e-04,  # x1
+                9.295083722e-02,  # x2
+                8.463066114e-04,  # x3
+            ]
+        )
+        np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-6)
 
         # ci = model.conf_int(method="pl")
         # # Profile likelihood CIs from coxphf (in log scale)

@@ -450,29 +450,29 @@ def newton_raphson_cox(
     beta_new = np.empty(k, dtype=np.float64)
 
     loglik = compute_cox_quantities(
-        X,
-        block_ends,
-        block_d,
-        block_s,
-        beta,
-        eta,
-        risk,
-        wX,
-        S0_cumsum,
-        S1_cumsum,
-        S2_cumsum,
-        fisher_info,
-        fisher_work,
-        XI,
-        h,
-        wXh,
-        A_cumsum,
-        B_cumsum,
-        modified_score,
-        x_bar,
-        Ix,
-        term1,
-        term23,
+        X=X,
+        block_ends=block_ends,
+        block_d=block_d,
+        block_s=block_s,
+        beta=beta,
+        eta=eta,
+        risk=risk,
+        wX=wX,
+        S0_cumsum=S0_cumsum,
+        S1_cumsum=S1_cumsum,
+        S2_cumsum=S2_cumsum,
+        fisher_info=fisher_info,
+        fisher_work=fisher_work,
+        XI=XI,
+        h=h,
+        wXh=wXh,
+        A_cumsum=A_cumsum,
+        B_cumsum=B_cumsum,
+        modified_score=modified_score,
+        x_bar=x_bar,
+        Ix=Ix,
+        term1=term1,
+        term23=term23,
     )
 
     for iteration in range(1, max_iter + 1):
@@ -503,29 +503,29 @@ def newton_raphson_cox(
             beta_new[i] = beta[i] + delta[i]
 
         loglik_new = compute_cox_quantities(
-            X,
-            block_ends,
-            block_d,
-            block_s,
-            beta_new,
-            eta,
-            risk,
-            wX,
-            S0_cumsum,
-            S1_cumsum,
-            S2_cumsum,
-            fisher_info,
-            fisher_work,
-            XI,
-            h,
-            wXh,
-            A_cumsum,
-            B_cumsum,
-            modified_score,
-            x_bar,
-            Ix,
-            term1,
-            term23,
+            X=X,
+            block_ends=block_ends,
+            block_d=block_d,
+            block_s=block_s,
+            beta=beta_new,
+            eta=eta,
+            risk=risk,
+            wX=wX,
+            S0_cumsum=S0_cumsum,
+            S1_cumsum=S1_cumsum,
+            S2_cumsum=S2_cumsum,
+            fisher_info=fisher_info,
+            fisher_work=fisher_work,
+            XI=XI,
+            h=h,
+            wXh=wXh,
+            A_cumsum=A_cumsum,
+            B_cumsum=B_cumsum,
+            modified_score=modified_score,
+            x_bar=x_bar,
+            Ix=Ix,
+            term1=term1,
+            term23=term23,
         )
 
         if loglik_new >= loglik or max_halfstep == 0:
@@ -539,29 +539,29 @@ def newton_raphson_cox(
                 for i in range(k):
                     beta_new[i] = beta[i] + step_factor * delta[i]
                 loglik_new = compute_cox_quantities(
-                    X,
-                    block_ends,
-                    block_d,
-                    block_s,
-                    beta_new,
-                    eta,
-                    risk,
-                    wX,
-                    S0_cumsum,
-                    S1_cumsum,
-                    S2_cumsum,
-                    fisher_info,
-                    fisher_work,
-                    XI,
-                    h,
-                    wXh,
-                    A_cumsum,
-                    B_cumsum,
-                    modified_score,
-                    x_bar,
-                    Ix,
-                    term1,
-                    term23,
+                    X=X,
+                    block_ends=block_ends,
+                    block_d=block_d,
+                    block_s=block_s,
+                    beta=beta_new,
+                    eta=eta,
+                    risk=risk,
+                    wX=wX,
+                    S0_cumsum=S0_cumsum,
+                    S1_cumsum=S1_cumsum,
+                    S2_cumsum=S2_cumsum,
+                    fisher_info=fisher_info,
+                    fisher_work=fisher_work,
+                    XI=XI,
+                    h=h,
+                    wXh=wXh,
+                    A_cumsum=A_cumsum,
+                    B_cumsum=B_cumsum,
+                    modified_score=modified_score,
+                    x_bar=x_bar,
+                    Ix=Ix,
+                    term1=term1,
+                    term23=term23,
                 )
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -575,3 +575,201 @@ def newton_raphson_cox(
                 return beta, loglik, fisher_info, iteration, _STATUS_STEP_HALVING_FAILED
 
     return beta, loglik, fisher_info, max_iter, _STATUS_MAX_ITER
+
+
+@njit(fastmath=True, cache=True)
+def constrained_lrt_1df_cox(
+    X: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    block_s: NDArray[np.float64],
+    idx: int,
+    max_iter: int,
+    max_step: float,
+    max_halfstep: int,
+    gtol: float,
+    xtol: float,
+    workspace: tuple[NDArray[np.float64], ...],
+) -> tuple[float, int, int]:
+    (
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+    ) = workspace
+
+    n, k = X.shape
+    free_k = k - 1
+
+    beta = np.zeros(k, dtype=np.float64)
+    eta = np.empty(n, dtype=np.float64)
+    risk = np.empty(n, dtype=np.float64)
+    fisher_info = _alloc_f_order(k, k)
+    fisher_work = _alloc_f_order(k, k)
+    XI = np.empty((n, k), dtype=np.float64)
+    h = np.empty(n, dtype=np.float64)
+    modified_score = np.empty(k, dtype=np.float64)
+    x_bar = np.empty(k, dtype=np.float64)
+    Ix = np.empty(k, dtype=np.float64)
+    term1 = np.empty(k, dtype=np.float64)
+    term23 = np.empty(k, dtype=np.float64)
+
+    free_idx = np.empty(free_k, dtype=np.intp)
+    pos = 0
+    for j in range(k):
+        if j != idx:
+            free_idx[pos] = j
+            pos += 1
+
+    fisher_free = _alloc_f_order(free_k, free_k)
+    score_free = np.empty(free_k, dtype=np.float64)
+    score_col = _alloc_f_order(free_k, 1)
+    delta = np.empty(free_k, dtype=np.float64)
+    beta_new = np.empty(k, dtype=np.float64)
+
+    loglik = compute_cox_quantities(
+        X=X,
+        block_ends=block_ends,
+        block_d=block_d,
+        block_s=block_s,
+        beta=beta,
+        eta=eta,
+        risk=risk,
+        wX=wX,
+        S0_cumsum=S0_cumsum,
+        S1_cumsum=S1_cumsum,
+        S2_cumsum=S2_cumsum,
+        fisher_info=fisher_info,
+        fisher_work=fisher_work,
+        XI=XI,
+        h=h,
+        wXh=wXh,
+        A_cumsum=A_cumsum,
+        B_cumsum=B_cumsum,
+        modified_score=modified_score,
+        x_bar=x_bar,
+        Ix=Ix,
+        term1=term1,
+        term23=term23,
+    )
+
+    for iteration in range(1, max_iter + 1):
+        for i in range(free_k):
+            score_free[i] = modified_score[free_idx[i]]
+
+        for i in range(free_k):
+            ii = free_idx[i]
+            for j in range(free_k):
+                jj = free_idx[j]
+                fisher_free[i, j] = fisher_info[ii, jj]
+
+        info = dpotrf(fisher_free)
+        if info == 0:
+            for i in range(free_k):
+                score_col[i, 0] = score_free[i]
+            info = dpotrs(fisher_free, score_col)
+            if info == 0:
+                for i in range(free_k):
+                    delta[i] = score_col[i, 0]
+        if info != 0:  # dpotrf or dpotrs failed
+            for i in range(free_k):
+                ii = free_idx[i]
+                for j in range(free_k):
+                    jj = free_idx[j]
+                    fisher_free[i, j] = fisher_info[ii, jj]
+            delta[:] = np.linalg.lstsq(fisher_free, score_free)[0]
+
+        max_score = max_abs(score_free)
+        max_delta = max_abs(delta)
+        if max_score < gtol and max_delta < xtol:
+            return loglik, iteration, _STATUS_CONVERGED
+
+        if max_delta > max_step:
+            scale = max_step / max_delta
+            for i in range(free_k):
+                delta[i] *= scale
+
+        for i in range(k):
+            beta_new[i] = beta[i]
+        for i in range(free_k):
+            beta_new[free_idx[i]] = beta[free_idx[i]] + delta[i]
+        beta_new[idx] = 0.0
+
+        loglik_new = compute_cox_quantities(
+            X=X,
+            block_ends=block_ends,
+            block_d=block_d,
+            block_s=block_s,
+            beta=beta_new,
+            eta=eta,
+            risk=risk,
+            wX=wX,
+            S0_cumsum=S0_cumsum,
+            S1_cumsum=S1_cumsum,
+            S2_cumsum=S2_cumsum,
+            fisher_info=fisher_info,
+            fisher_work=fisher_work,
+            XI=XI,
+            h=h,
+            wXh=wXh,
+            A_cumsum=A_cumsum,
+            B_cumsum=B_cumsum,
+            modified_score=modified_score,
+            x_bar=x_bar,
+            Ix=Ix,
+            term1=term1,
+            term23=term23,
+        )
+
+        if loglik_new >= loglik or max_halfstep == 0:
+            for i in range(k):
+                beta[i] = beta_new[i]
+            loglik = loglik_new
+        else:
+            step_factor = 0.5
+            accepted = False
+            for _ in range(max_halfstep):
+                for i in range(free_k):
+                    beta_new[free_idx[i]] = beta[free_idx[i]] + step_factor * delta[i]
+                beta_new[idx] = 0.0
+
+                loglik_new = compute_cox_quantities(
+                    X=X,
+                    block_ends=block_ends,
+                    block_d=block_d,
+                    block_s=block_s,
+                    beta=beta_new,
+                    eta=eta,
+                    risk=risk,
+                    wX=wX,
+                    S0_cumsum=S0_cumsum,
+                    S1_cumsum=S1_cumsum,
+                    S2_cumsum=S2_cumsum,
+                    fisher_info=fisher_info,
+                    fisher_work=fisher_work,
+                    XI=XI,
+                    h=h,
+                    wXh=wXh,
+                    A_cumsum=A_cumsum,
+                    B_cumsum=B_cumsum,
+                    modified_score=modified_score,
+                    x_bar=x_bar,
+                    Ix=Ix,
+                    term1=term1,
+                    term23=term23,
+                )
+                if loglik_new >= loglik:
+                    for i in range(k):
+                        beta[i] = beta_new[i]
+                    loglik = loglik_new
+                    accepted = True
+                    break
+                step_factor *= 0.5
+
+            if not accepted:
+                return loglik, iteration, _STATUS_STEP_HALVING_FAILED
+
+    return loglik, max_iter, _STATUS_MAX_ITER

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Literal, Self, Sequence, cast
@@ -19,11 +20,12 @@ if NUMBA_AVAILABLE:
         _STATUS_CONVERGED,
         _STATUS_MAX_ITER,
         _STATUS_STEP_HALVING_FAILED,
+        constrained_lrt_1df_cox,
         newton_raphson_cox,
         precompute_cox,
     )
 
-from firthmodels._lrt import constrained_lrt_1df
+from firthmodels._lrt import LRTResult, constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
 from firthmodels._utils import FirthResult, resolve_feature_indices
@@ -274,24 +276,48 @@ class FirthCoxPH(BaseEstimator):
             Index of the coefficient to test.
         """
 
-        def compute_quantities_full(beta):
-            return compute_cox_quantities(
-                beta=beta, precomputed=self._precomputed, workspace=self._workspace
+        if self._resolve_backend() == "numba":
+            constrained_loglik, n_iter, converged = constrained_lrt_1df_cox(
+                X=self._precomputed.X,
+                block_ends=self._precomputed.block_ends,
+                block_d=self._precomputed.block_d,
+                block_s=self._precomputed.block_s,
+                idx=idx,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=self._workspace.numba_buffers(),
             )
 
-        beta_hat_full = self.coef_
+            chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
+            pval = scipy.stats.chi2.sf(chi2, df=1)
 
-        result = constrained_lrt_1df(
-            idx=idx,
-            beta_hat_full=beta_hat_full,
-            loglik_full=self.loglik_,
-            compute_quantities_full=compute_quantities_full,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            # back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
+            bse = abs(self.coef_[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
+            result = LRTResult(chi2=chi2, pvalue=pval, bse_backcorrected=bse)
+
+        else:
+
+            def compute_quantities_full(beta):
+                return compute_cox_quantities(
+                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                )
+
+            beta_hat_full = self.coef_
+
+            result = constrained_lrt_1df(
+                idx=idx,
+                beta_hat_full=beta_hat_full,
+                loglik_full=self.loglik_,
+                compute_quantities_full=compute_quantities_full,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
 
         self.lrt_pvalues_[idx] = result.pvalue
         self.lrt_bse_[idx] = result.bse_backcorrected
