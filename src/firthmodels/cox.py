@@ -696,6 +696,17 @@ class _Workspace:
         self.B_cumsum = np.empty(n, dtype=np.float64)
         self.eye_k = np.eye(k, dtype=np.float64, order="F")
 
+    def numba_buffers(self):  # for numba
+        return (
+            self.wX,
+            self.S0_cumsum,
+            self.S1_cumsum,
+            self.S2_cumsum,
+            self.wXh,
+            self.A_cumsum,
+            self.B_cumsum,
+        )
+
 
 def compute_cox_quantities(
     beta: NDArray[np.float64],

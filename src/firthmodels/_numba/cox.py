@@ -429,8 +429,8 @@ def newton_raphson_cox(
         wXh,
         A_cumsum,
         B_cumsum,
-        _,  # eye_k
     ) = workspace
+
     n, k = X.shape
     beta = np.zeros(k, dtype=np.float64)
     eta = np.empty(n, dtype=np.float64)
