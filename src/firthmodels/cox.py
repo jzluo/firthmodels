@@ -15,12 +15,18 @@ from sklearn.utils.validation import check_is_fitted, validate_data
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.cox import newton_raphson_cox, precompute_cox
+    from firthmodels._numba.cox import (
+        _STATUS_CONVERGED,
+        _STATUS_MAX_ITER,
+        _STATUS_STEP_HALVING_FAILED,
+        newton_raphson_cox,
+        precompute_cox,
+    )
 
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import resolve_feature_indices
+from firthmodels._utils import FirthResult, resolve_feature_indices
 
 
 class FirthCoxPH(BaseEstimator):
@@ -141,25 +147,50 @@ class FirthCoxPH(BaseEstimator):
         precomputed = _CoxPrecomputed.from_data(X, time, event, backend=backend)
         workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
-        # Create closure for newton_raphson
-        def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-            return compute_cox_quantities(beta, precomputed, workspace)
+        if backend == "numba":
+            beta, loglik, fisher_info, max_iter, status = newton_raphson_cox(
+                X=precomputed.X,
+                block_ends=precomputed.block_ends,
+                block_d=precomputed.block_d,
+                block_s=precomputed.block_s,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=workspace.numba_buffers(),
+            )
 
-        # Run optimizer
-        result = newton_raphson(
-            compute_quantities=quantities,
-            n_features=precomputed.n_features,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            result = FirthResult(
+                beta=beta,
+                loglik=loglik,
+                fisher_info=fisher_info,
+                n_iter=max_iter,
+                converged=status,
+            )
+
+            self.converged_ = result.converged == _STATUS_CONVERGED
+
+        else:  # numpy backend
+            # Create closure for newton_raphson
+            def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
+                return compute_cox_quantities(beta, precomputed, workspace)
+
+            # Run optimizer
+            result = newton_raphson(
+                compute_quantities=quantities,
+                n_features=precomputed.n_features,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
+            self.converged_ = result.converged
 
         self.coef_ = result.beta
         self.loglik_ = result.loglik
         self.n_iter_ = result.n_iter
-        self.converged_ = result.converged
 
         # Wald
         try:
