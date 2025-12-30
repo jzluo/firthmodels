@@ -62,7 +62,7 @@ class TestCoxPrecomputed:
         time = np.array([2.0, 5.0, 2.0, 5.0, 3.0, 4.0])
         event = np.array([1, 1, 0, 1, 1, 0], dtype=bool)
 
-        pre = _CoxPrecomputed.from_data(X, time, event)
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
 
         # Sorted times: 5,5,4,3,2,2 -> block ends at [2,3,4,6]
         np.testing.assert_array_equal(pre.block_ends, np.array([2, 3, 4, 6]))
@@ -88,7 +88,7 @@ class TestFirthCoxPH:
         event = np.array([True, False])
         y = _structured_y(event, time)
 
-        model = FirthCoxPH()
+        model = FirthCoxPH(backend="numpy")
         model.fit(X, y)
 
         assert model.converged_
@@ -103,7 +103,7 @@ class TestFirthCoxPH:
         event = np.array([True, False])
         y = _structured_y(event, time)
 
-        model = FirthCoxPH().fit(X, y)
+        model = FirthCoxPH(backend="numpy").fit(X, y)
 
         np.testing.assert_array_equal(model.unique_times_, [1.0])
         np.testing.assert_allclose(model.cum_baseline_hazard_, [0.25], rtol=1e-6)
@@ -116,7 +116,7 @@ class TestFirthCoxPH:
         X, time, event = cox_separation_data
         y = _structured_y(event, time)
 
-        model = FirthCoxPH()
+        model = FirthCoxPH(backend="numpy")
         model.fit(X, y)
 
         expected_coef = np.array(
@@ -133,7 +133,7 @@ class TestFirthCoxPH:
 
         # Absolute penalized log-likelihoods differ with coxphf by an
         # additive constant. Compare likelihood ratios instead.
-        pre = _CoxPrecomputed.from_data(X, time, event)
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
         ws = _Workspace(pre.n_samples, pre.n_features)
         null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre, ws).loglik
         lr_stat = 2.0 * (model.loglik_ - null_loglik)

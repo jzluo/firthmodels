@@ -13,6 +13,10 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
 
 from firthmodels import NUMBA_AVAILABLE
+
+if NUMBA_AVAILABLE:
+    from firthmodels._numba.cox import newton_raphson_cox, precompute_cox
+
 from firthmodels._lrt import constrained_lrt_1df
 from firthmodels._profile_ci import profile_ci_bound
 from firthmodels._solvers import newton_raphson
@@ -132,8 +136,9 @@ class FirthCoxPH(BaseEstimator):
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
 
+        backend = self._resolve_backend()
         # Precompute sorted data and block structure
-        precomputed = _CoxPrecomputed.from_data(X, time, event)
+        precomputed = _CoxPrecomputed.from_data(X, time, event, backend=backend)
         workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
         # Create closure for newton_raphson
@@ -516,6 +521,7 @@ class _CoxPrecomputed:
         X: NDArray[np.float64],
         time: NDArray[np.float64],
         event: NDArray[np.bool_],
+        backend: Literal["numba", "numpy"] = "numba",
     ) -> Self:
         """
         Sort samples and compute block structure.
@@ -534,6 +540,19 @@ class _CoxPrecomputed:
         _CoxPrecomputed
             Precomputed data for likelihood evaluation.
         """
+        if backend == "numba":
+            X, time, event, block_ends, block_d, block_s = precompute_cox(
+                X, time, event
+            )
+            return cls(
+                X=X,
+                time=time,
+                event=event,
+                block_ends=block_ends,
+                block_d=block_d,
+                block_s=block_s,
+            )
+
         # d = number of deaths at time t
         # s = vector sum of the covariates of the d individuals
         n, k = X.shape
