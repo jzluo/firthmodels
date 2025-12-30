@@ -405,3 +405,173 @@ def compute_cox_quantities(
     loglik += 0.5 * logdet
 
     return loglik
+
+
+@njit(cache=True)
+def newton_raphson_cox(
+    X: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    block_s: NDArray[np.float64],
+    max_iter: int,
+    max_step: float,
+    max_halfstep: int,
+    gtol: float,
+    xtol: float,
+    workspace: tuple[NDArray[np.float64], ...],
+) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, int]:
+    # beta, loglik, fisher_info, max_iter, status
+    (
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+        _,  # eye_k
+    ) = workspace
+    n, k = X.shape
+    beta = np.zeros(k, dtype=np.float64)
+    eta = np.empty(n, dtype=np.float64)
+    risk = np.empty(n, dtype=np.float64)
+    fisher_info = _alloc_f_order(k, k)
+    fisher_work = _alloc_f_order(k, k)
+    XI = np.empty((n, k), dtype=np.float64)
+    h = np.empty(n, dtype=np.float64)
+    modified_score = np.empty(k, dtype=np.float64)
+    x_bar = np.empty(k, dtype=np.float64)
+    Ix = np.empty(k, dtype=np.float64)
+    term1 = np.empty(k, dtype=np.float64)
+    term23 = np.empty(k, dtype=np.float64)
+
+    score_col = _alloc_f_order(k, 1)
+    delta = np.empty(k, dtype=np.float64)
+    beta_new = np.empty(k, dtype=np.float64)
+
+    loglik = compute_cox_quantities(
+        X,
+        block_ends,
+        block_d,
+        block_s,
+        beta,
+        eta,
+        risk,
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        fisher_info,
+        fisher_work,
+        XI,
+        h,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+        modified_score,
+        x_bar,
+        Ix,
+        term1,
+        term23,
+    )
+
+    for iteration in range(1, max_iter + 1):
+        fisher_work[:] = fisher_info
+
+        info = dpotrf(fisher_work)
+        if info == 0:
+            for i in range(k):
+                score_col[i, 0] = modified_score[i]
+            info = dpotrs(fisher_work, score_col)
+            if info == 0:
+                for i in range(k):
+                    delta[i] = score_col[i, 0]
+        if info != 0:  # dpotrf or dpotrs failed
+            delta[:] = np.linalg.lstsq(fisher_info, modified_score)[0]
+
+        max_score = max_abs(modified_score)
+        max_delta = max_abs(delta)
+        if max_score < gtol and max_delta < xtol:
+            return beta, loglik, fisher_info, iteration, _STATUS_CONVERGED
+
+        if max_delta > max_step:
+            scale = max_step / max_delta
+            for i in range(k):
+                delta[i] *= scale
+
+        for i in range(k):
+            beta_new[i] = beta[i] + delta[i]
+
+        loglik_new = compute_cox_quantities(
+            X,
+            block_ends,
+            block_d,
+            block_s,
+            beta_new,
+            eta,
+            risk,
+            wX,
+            S0_cumsum,
+            S1_cumsum,
+            S2_cumsum,
+            fisher_info,
+            fisher_work,
+            XI,
+            h,
+            wXh,
+            A_cumsum,
+            B_cumsum,
+            modified_score,
+            x_bar,
+            Ix,
+            term1,
+            term23,
+        )
+
+        if loglik_new >= loglik or max_halfstep == 0:
+            for i in range(k):
+                beta[i] = beta_new[i]
+            loglik = loglik_new
+        else:
+            step_factor = 0.5
+            accepted = False
+            for _ in range(max_halfstep):
+                for i in range(k):
+                    beta_new[i] = beta[i] + step_factor * delta[i]
+                loglik_new = compute_cox_quantities(
+                    X,
+                    block_ends,
+                    block_d,
+                    block_s,
+                    beta_new,
+                    eta,
+                    risk,
+                    wX,
+                    S0_cumsum,
+                    S1_cumsum,
+                    S2_cumsum,
+                    fisher_info,
+                    fisher_work,
+                    XI,
+                    h,
+                    wXh,
+                    A_cumsum,
+                    B_cumsum,
+                    modified_score,
+                    x_bar,
+                    Ix,
+                    term1,
+                    term23,
+                )
+                if loglik_new >= loglik:
+                    for i in range(k):
+                        beta[i] = beta_new[i]
+                    loglik = loglik_new
+                    accepted = True
+                    break
+                step_factor *= 0.5
+
+            if not accepted:
+                return beta, loglik, fisher_info, iteration, _STATUS_STEP_HALVING_FAILED
+
+    return beta, loglik, fisher_info, max_iter, _STATUS_MAX_ITER
