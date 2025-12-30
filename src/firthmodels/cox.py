@@ -797,11 +797,11 @@ class _Workspace:
             self.wXh,
             self.A_cumsum,
             self.B_cumsum,
-            # self.eta,
-            # self.risk,
-            # self.XI,
-            # self.h,
-            # self.fisher_info
+            self.eta,
+            self.risk,
+            self.XI,
+            self.h,
+            self.fisher_info,
         )
 
 

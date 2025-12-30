@@ -1,3 +1,10 @@
+"""
+Numba-accelerated Firth Cox proportional hazards.
+
+JIT-compiled versions of the numpy/scipy implementations in src/firthmodels/cox.py,
+_solvers.py, _lrt.py, and _profile_ci.py.
+"""
+
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
@@ -22,7 +29,7 @@ _STATUS_STEP_HALVING_FAILED = 1
 _STATUS_MAX_ITER = 2
 
 
-@njit(fastmath=False, cache=True)
+@njit(cache=True)
 def max_abs(vec: NDArray[np.float64]) -> float:
     max_val = 0.0
     for i in range(vec.shape[0]):
@@ -205,24 +212,30 @@ def _compute_firth_correction(
     X: NDArray[np.float64],
     block_ends: NDArray[np.intp],
     block_d: NDArray[np.int64],
-    S0_cumsum: NDArray[np.float64],
-    S1_cumsum: NDArray[np.float64],
-    S2_cumsum: NDArray[np.float64],
-    risk: NDArray[np.float64],
-    wX: NDArray[np.float64],
     fisher_inv: NDArray[np.float64],
     modified_score: NDArray[np.float64],
-    XI: NDArray[np.float64],
-    h: NDArray[np.float64],
-    wXh: NDArray[np.float64],
-    A_cumsum: NDArray[np.float64],
-    B_cumsum: NDArray[np.float64],
     x_bar: NDArray[np.float64],
     Ix: NDArray[np.float64],
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
+    workspace: tuple[NDArray[np.float64], ...],
 ):
     """Add Firth penalty term to score (modifies score in-place)."""
+    (
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+        eta,
+        risk,
+        XI,
+        h,
+        fisher_info,
+    ) = workspace
+
     n, k = X.shape
 
     # XI = X @ inv_fisher_info
@@ -313,27 +326,30 @@ def compute_cox_quantities(
     block_d: NDArray[np.int64],
     block_s: NDArray[np.float64],
     beta: NDArray[np.float64],
-    eta: NDArray[np.float64],
-    risk: NDArray[np.float64],
-    wX: NDArray[np.float64],
-    S0_cumsum: NDArray[np.float64],
-    S1_cumsum: NDArray[np.float64],
-    S2_cumsum: NDArray[np.float64],
-    fisher_info: NDArray[np.float64],
     fisher_work: NDArray[np.float64],
-    XI: NDArray[np.float64],
-    h: NDArray[np.float64],
-    wXh: NDArray[np.float64],
-    A_cumsum: NDArray[np.float64],
-    B_cumsum: NDArray[np.float64],
     modified_score: NDArray[np.float64],
     x_bar: NDArray[np.float64],
     Ix: NDArray[np.float64],
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
+    workspace: tuple[NDArray[np.float64], ...],
 ):
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     n, k = X.shape
+    (
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+        eta,
+        risk,
+        XI,
+        h,
+        fisher_info,
+    ) = workspace
 
     c = _compute_risk_sum_sets(
         X=X,
@@ -385,22 +401,13 @@ def compute_cox_quantities(
         X=X,
         block_ends=block_ends,
         block_d=block_d,
-        S0_cumsum=S0_cumsum,
-        S1_cumsum=S1_cumsum,
-        S2_cumsum=S2_cumsum,
-        risk=risk,
-        wX=wX,
         fisher_inv=fisher_work,
         modified_score=modified_score,
-        XI=XI,
-        h=h,
-        wXh=wXh,
-        A_cumsum=A_cumsum,
-        B_cumsum=B_cumsum,
         x_bar=x_bar,
         Ix=Ix,
         term1=term1,
         term23=term23,
+        workspace=workspace,
     )
 
     loglik += 0.5 * logdet
@@ -434,16 +441,16 @@ def newton_raphson_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eta,
+        risk,
+        XI,
+        h,
+        fisher_info,
     ) = workspace
 
     n, k = X.shape
     beta = np.zeros(k, dtype=np.float64)
-    eta = np.empty(n, dtype=np.float64)
-    risk = np.empty(n, dtype=np.float64)
-    fisher_info = _alloc_f_order(k, k)
     fisher_work = _alloc_f_order(k, k)
-    XI = np.empty((n, k), dtype=np.float64)
-    h = np.empty(n, dtype=np.float64)
     modified_score = np.empty(k, dtype=np.float64)
     x_bar = np.empty(k, dtype=np.float64)
     Ix = np.empty(k, dtype=np.float64)
@@ -460,24 +467,13 @@ def newton_raphson_cox(
         block_d=block_d,
         block_s=block_s,
         beta=beta,
-        eta=eta,
-        risk=risk,
-        wX=wX,
-        S0_cumsum=S0_cumsum,
-        S1_cumsum=S1_cumsum,
-        S2_cumsum=S2_cumsum,
-        fisher_info=fisher_info,
         fisher_work=fisher_work,
-        XI=XI,
-        h=h,
-        wXh=wXh,
-        A_cumsum=A_cumsum,
-        B_cumsum=B_cumsum,
         modified_score=modified_score,
         x_bar=x_bar,
         Ix=Ix,
         term1=term1,
         term23=term23,
+        workspace=workspace,
     )
 
     for iteration in range(1, max_iter + 1):
@@ -513,24 +509,13 @@ def newton_raphson_cox(
             block_d=block_d,
             block_s=block_s,
             beta=beta_new,
-            eta=eta,
-            risk=risk,
-            wX=wX,
-            S0_cumsum=S0_cumsum,
-            S1_cumsum=S1_cumsum,
-            S2_cumsum=S2_cumsum,
-            fisher_info=fisher_info,
             fisher_work=fisher_work,
-            XI=XI,
-            h=h,
-            wXh=wXh,
-            A_cumsum=A_cumsum,
-            B_cumsum=B_cumsum,
             modified_score=modified_score,
             x_bar=x_bar,
             Ix=Ix,
             term1=term1,
             term23=term23,
+            workspace=workspace,
         )
 
         if loglik_new >= loglik or max_halfstep == 0:
@@ -549,24 +534,13 @@ def newton_raphson_cox(
                     block_d=block_d,
                     block_s=block_s,
                     beta=beta_new,
-                    eta=eta,
-                    risk=risk,
-                    wX=wX,
-                    S0_cumsum=S0_cumsum,
-                    S1_cumsum=S1_cumsum,
-                    S2_cumsum=S2_cumsum,
-                    fisher_info=fisher_info,
                     fisher_work=fisher_work,
-                    XI=XI,
-                    h=h,
-                    wXh=wXh,
-                    A_cumsum=A_cumsum,
-                    B_cumsum=B_cumsum,
                     modified_score=modified_score,
                     x_bar=x_bar,
                     Ix=Ix,
                     term1=term1,
                     term23=term23,
+                    workspace=workspace,
                 )
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -609,18 +583,18 @@ def constrained_lrt_1df_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eta,
+        risk,
+        XI,
+        h,
+        fisher_info,
     ) = workspace
 
     n, k = X.shape
     free_k = k - 1
 
     beta = np.zeros(k, dtype=np.float64)
-    eta = np.empty(n, dtype=np.float64)
-    risk = np.empty(n, dtype=np.float64)
-    fisher_info = _alloc_f_order(k, k)
     fisher_work = _alloc_f_order(k, k)
-    XI = np.empty((n, k), dtype=np.float64)
-    h = np.empty(n, dtype=np.float64)
     modified_score = np.empty(k, dtype=np.float64)
     x_bar = np.empty(k, dtype=np.float64)
     Ix = np.empty(k, dtype=np.float64)
@@ -646,24 +620,13 @@ def constrained_lrt_1df_cox(
         block_d=block_d,
         block_s=block_s,
         beta=beta,
-        eta=eta,
-        risk=risk,
-        wX=wX,
-        S0_cumsum=S0_cumsum,
-        S1_cumsum=S1_cumsum,
-        S2_cumsum=S2_cumsum,
-        fisher_info=fisher_info,
         fisher_work=fisher_work,
-        XI=XI,
-        h=h,
-        wXh=wXh,
-        A_cumsum=A_cumsum,
-        B_cumsum=B_cumsum,
         modified_score=modified_score,
         x_bar=x_bar,
         Ix=Ix,
         term1=term1,
         term23=term23,
+        workspace=workspace,
     )
 
     for iteration in range(1, max_iter + 1):
@@ -714,24 +677,13 @@ def constrained_lrt_1df_cox(
             block_d=block_d,
             block_s=block_s,
             beta=beta_new,
-            eta=eta,
-            risk=risk,
-            wX=wX,
-            S0_cumsum=S0_cumsum,
-            S1_cumsum=S1_cumsum,
-            S2_cumsum=S2_cumsum,
-            fisher_info=fisher_info,
             fisher_work=fisher_work,
-            XI=XI,
-            h=h,
-            wXh=wXh,
-            A_cumsum=A_cumsum,
-            B_cumsum=B_cumsum,
             modified_score=modified_score,
             x_bar=x_bar,
             Ix=Ix,
             term1=term1,
             term23=term23,
+            workspace=workspace,
         )
 
         if loglik_new >= loglik or max_halfstep == 0:
@@ -752,25 +704,15 @@ def constrained_lrt_1df_cox(
                     block_d=block_d,
                     block_s=block_s,
                     beta=beta_new,
-                    eta=eta,
-                    risk=risk,
-                    wX=wX,
-                    S0_cumsum=S0_cumsum,
-                    S1_cumsum=S1_cumsum,
-                    S2_cumsum=S2_cumsum,
-                    fisher_info=fisher_info,
                     fisher_work=fisher_work,
-                    XI=XI,
-                    h=h,
-                    wXh=wXh,
-                    A_cumsum=A_cumsum,
-                    B_cumsum=B_cumsum,
                     modified_score=modified_score,
                     x_bar=x_bar,
                     Ix=Ix,
                     term1=term1,
                     term23=term23,
+                    workspace=workspace,
                 )
+
                 if loglik_new >= loglik:
                     for i in range(k):
                         beta[i] = beta_new[i]
@@ -810,18 +752,18 @@ def profile_ci_bound_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eta,
+        risk,
+        XI,
+        h,
+        fisher_info,
     ) = workspace
 
     n, k = X.shape
     theta = theta_hat.copy()
 
     beta = np.zeros(k, dtype=np.float64)
-    eta = np.empty(n, dtype=np.float64)
-    risk = np.empty(n, dtype=np.float64)
-    fisher_info = _alloc_f_order(k, k)
     fisher_work = _alloc_f_order(k, k)
-    XI = np.empty((n, k), dtype=np.float64)
-    h = np.empty(n, dtype=np.float64)
     modified_score = np.empty(k, dtype=np.float64)
     x_bar = np.empty(k, dtype=np.float64)
     Ix = np.empty(k, dtype=np.float64)
@@ -895,24 +837,13 @@ def profile_ci_bound_cox(
             block_d=block_d,
             block_s=block_s,
             beta=theta,
-            eta=eta,
-            risk=risk,
-            wX=wX,
-            S0_cumsum=S0_cumsum,
-            S1_cumsum=S1_cumsum,
-            S2_cumsum=S2_cumsum,
-            fisher_info=fisher_info,
             fisher_work=fisher_work,
-            XI=XI,
-            h=h,
-            wXh=wXh,
-            A_cumsum=A_cumsum,
-            B_cumsum=B_cumsum,
             modified_score=modified_score,
             x_bar=x_bar,
             Ix=Ix,
             term1=term1,
             term23=term23,
+            workspace=workspace,
         )
 
         # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
