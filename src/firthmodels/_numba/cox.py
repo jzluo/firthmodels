@@ -90,12 +90,9 @@ def precompute_cox(
     return X_sorted, time_sorted, event_sorted, block_ends, block_d, block_s
 
 
-@njit(cache=True, fastmath=True)
-def compute_cox_quantities(
+@njit(fastmath=True, inline="always", cache=True)
+def _compute_risk_sum_sets(
     X: NDArray[np.float64],
-    block_ends: NDArray[np.intp],
-    block_d: NDArray[np.int64],
-    block_s: NDArray[np.float64],
     beta: NDArray[np.float64],
     eta: NDArray[np.float64],
     risk: NDArray[np.float64],
@@ -103,20 +100,10 @@ def compute_cox_quantities(
     S0_cumsum: NDArray[np.float64],
     S1_cumsum: NDArray[np.float64],
     S2_cumsum: NDArray[np.float64],
-    fisher_info: NDArray[np.float64],
-    fisher_work: NDArray[np.float64],
-    XI: NDArray[np.float64],
-    h: NDArray[np.float64],
-    wXh: NDArray[np.float64],
-    A_cumsum: NDArray[np.float64],
-    B_cumsum: NDArray[np.float64],
-    modified_score: NDArray[np.float64],
-    x_bar: NDArray[np.float64],
-    Ix: NDArray[np.float64],
-    term1: NDArray[np.float64],
-    term23: NDArray[np.float64],
 ):
+    """Compute eta, risk, and cumulative risk-set sums"""
     n, k = X.shape
+
     # eta = X @ beta and stable exp scaling via c
     c = -np.inf
     for i in range(n):
@@ -152,6 +139,26 @@ def compute_cox_quantities(
                     S2_cumsum[i, r, s] = val
                 else:
                     S2_cumsum[i, r, s] = S2_cumsum[i - 1, r, s] + val
+
+    return c
+
+
+@njit(fastmath=True, inline="always", cache=True)
+def _compute_score_fisher_loglik(
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    block_s: NDArray[np.float64],
+    beta: NDArray[np.float64],
+    S0_cumsum: NDArray[np.float64],
+    S1_cumsum: NDArray[np.float64],
+    S2_cumsum: NDArray[np.float64],
+    x_bar: NDArray[np.float64],
+    modified_score: NDArray[np.float64],
+    fisher_info: NDArray[np.float64],
+    c: float,
+):
+    """Accumulate score and Fisher info across event blocks."""
+    k = beta.shape[0]
 
     # zero score and Fisher info accumulators
     for i in range(k):
@@ -190,26 +197,33 @@ def compute_cox_quantities(
                 val = S2_cumsum[end_idx, r, s] * S0_inv - x_r * x_bar[s]
                 fisher_info[r, s] += d * val
 
-    fisher_work[:, :] = fisher_info
-    info = dpotrf(fisher_work)  # fisher_work now holds L
-    if info == 0:
-        logdet = 0.0
-        for i in range(k):
-            logdet += np.log(fisher_work[i, i])
-        logdet *= 2.0
-        info = dpotri(fisher_work)  # fisher_work now holds inv(fisher_info)
-        if info == 0:
-            symmetrize_lower(fisher_work)
-    if info != 0:  # dpotrf or dpotri failed
-        sign, logdet = np.linalg.slogdet(fisher_info)
-        if sign <= 0:
-            logdet = -np.inf
-        for i in range(k):
-            for j in range(k):
-                fisher_work[i, j] = 0.0
-            fisher_work[i, i] = 1.0
-        fisher_work[:, :] = np.linalg.lstsq(fisher_info, fisher_work)[0]
-        # fisher_work now holds inv(fisher_info)
+    return loglik
+
+
+@njit(fastmath=True, inline="always", cache=True)
+def _compute_firth_correction(
+    X: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    S0_cumsum: NDArray[np.float64],
+    S1_cumsum: NDArray[np.float64],
+    S2_cumsum: NDArray[np.float64],
+    risk: NDArray[np.float64],
+    wX: NDArray[np.float64],
+    fisher_inv: NDArray[np.float64],
+    modified_score: NDArray[np.float64],
+    XI: NDArray[np.float64],
+    h: NDArray[np.float64],
+    wXh: NDArray[np.float64],
+    A_cumsum: NDArray[np.float64],
+    B_cumsum: NDArray[np.float64],
+    x_bar: NDArray[np.float64],
+    Ix: NDArray[np.float64],
+    term1: NDArray[np.float64],
+    term23: NDArray[np.float64],
+):
+    """Add Firth penalty term to score (modifies score in-place)."""
+    n, k = X.shape
 
     # XI = X @ inv_fisher_info
     # TODO: benchmark BLAS-based XI/Ix (with transa using X.T or F-order X) vs loops.
@@ -219,7 +233,7 @@ def compute_cox_quantities(
         for j in range(k):
             total = 0.0
             for r in range(k):
-                total += X[i, r] * fisher_work[r, j]
+                total += X[i, r] * fisher_inv[r, j]
             XI[i, j] = total
 
     # h = np.einsum("ij,ij->i", XI, X)
@@ -247,6 +261,7 @@ def compute_cox_quantities(
                 A_cumsum[i, j] = A_cumsum[i - 1, j] + wXh_ij
 
     # Index at event block boundaries
+    n_blocks = block_ends.shape[0]
     for block in range(n_blocks):
         d = block_d[block]
         if d <= 0:
@@ -274,9 +289,7 @@ def compute_cox_quantities(
         for t in range(k):
             total = 0.0
             for r in range(k):
-                total += (
-                    x_bar[r] * fisher_work[r, t]
-                )  # fisher_work holds inv(fisher_info)
+                total += x_bar[r] * fisher_inv[r, t]
             Ix[t] = total
 
         for t in range(k):
@@ -291,6 +304,103 @@ def compute_cox_quantities(
         # modified_score = score + firth_correction
         for t in range(k):
             modified_score[t] += 0.5 * d * (term1[t] - 2.0 * term23[t])
+
+
+@njit(cache=True, fastmath=True)
+def compute_cox_quantities(
+    X: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    block_s: NDArray[np.float64],
+    beta: NDArray[np.float64],
+    eta: NDArray[np.float64],
+    risk: NDArray[np.float64],
+    wX: NDArray[np.float64],
+    S0_cumsum: NDArray[np.float64],
+    S1_cumsum: NDArray[np.float64],
+    S2_cumsum: NDArray[np.float64],
+    fisher_info: NDArray[np.float64],
+    fisher_work: NDArray[np.float64],
+    XI: NDArray[np.float64],
+    h: NDArray[np.float64],
+    wXh: NDArray[np.float64],
+    A_cumsum: NDArray[np.float64],
+    B_cumsum: NDArray[np.float64],
+    modified_score: NDArray[np.float64],
+    x_bar: NDArray[np.float64],
+    Ix: NDArray[np.float64],
+    term1: NDArray[np.float64],
+    term23: NDArray[np.float64],
+):
+    n, k = X.shape
+
+    c = _compute_risk_sum_sets(
+        X=X,
+        beta=beta,
+        eta=eta,
+        risk=risk,
+        wX=wX,
+        S0_cumsum=S0_cumsum,
+        S1_cumsum=S1_cumsum,
+        S2_cumsum=S2_cumsum,
+    )
+
+    loglik = _compute_score_fisher_loglik(
+        block_ends=block_ends,
+        block_d=block_d,
+        block_s=block_s,
+        beta=beta,
+        S0_cumsum=S0_cumsum,
+        S1_cumsum=S1_cumsum,
+        S2_cumsum=S2_cumsum,
+        x_bar=x_bar,
+        modified_score=modified_score,
+        fisher_info=fisher_info,
+        c=c,
+    )
+
+    fisher_work[:, :] = fisher_info
+    info = dpotrf(fisher_work)  # fisher_work now holds L
+    if info == 0:
+        logdet = 0.0
+        for i in range(k):
+            logdet += np.log(fisher_work[i, i])
+        logdet *= 2.0
+        info = dpotri(fisher_work)  # fisher_work now holds inv(fisher_info)
+        if info == 0:
+            symmetrize_lower(fisher_work)
+    if info != 0:  # dpotrf or dpotri failed
+        sign, logdet = np.linalg.slogdet(fisher_info)
+        if sign <= 0:
+            logdet = -np.inf
+        for i in range(k):
+            for j in range(k):
+                fisher_work[i, j] = 0.0
+            fisher_work[i, i] = 1.0
+        fisher_work[:, :] = np.linalg.lstsq(fisher_info, fisher_work)[0]
+        # fisher_work now holds inv(fisher_info)
+
+    _compute_firth_correction(
+        X=X,
+        block_ends=block_ends,
+        block_d=block_d,
+        S0_cumsum=S0_cumsum,
+        S1_cumsum=S1_cumsum,
+        S2_cumsum=S2_cumsum,
+        risk=risk,
+        wX=wX,
+        fisher_inv=fisher_work,
+        modified_score=modified_score,
+        XI=XI,
+        h=h,
+        wXh=wXh,
+        A_cumsum=A_cumsum,
+        B_cumsum=B_cumsum,
+        x_bar=x_bar,
+        Ix=Ix,
+        term1=term1,
+        term23=term23,
+    )
 
     loglik += 0.5 * logdet
 
