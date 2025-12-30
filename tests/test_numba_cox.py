@@ -107,7 +107,7 @@ class TestFirthCoxPH:
 
         assert model.converged_
         np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-6)
-        # np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-6)
+        np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-6)
 
         # Absolute penalized log-likelihoods differ with coxphf by an
         # additive constant. Compare likelihood ratios instead.
@@ -129,15 +129,15 @@ class TestFirthCoxPH:
         )
         np.testing.assert_allclose(model.lrt_pvalues_, expected_lrt_pvalues, rtol=1e-6)
 
-        # ci = model.conf_int(method="pl")
-        # # Profile likelihood CIs from coxphf (in log scale)
-        # expected_ci = np.array(
-        #     [
-        #         [1.9343469272, 8.7215676015],  # separator
-        #         [0.2921186188, 0.9164270978],  # x1
-        #         [-0.9217200647, 0.0699415336],  # x2
-        #         [0.4348431279, 1.6550461482],  # x3
-        #     ]
-        # )
+        ci = model.conf_int(method="pl")
+        # Profile likelihood CIs from coxphf (in log scale)
+        expected_ci = np.array(
+            [
+                [1.9343469272, 8.7215676015],  # separator
+                [0.2921186188, 0.9164270978],  # x1
+                [-0.9217200647, 0.0699415336],  # x2
+                [0.4348431279, 1.6550461482],  # x3
+            ]
+        )
 
-        # np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
+        np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)

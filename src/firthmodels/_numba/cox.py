@@ -332,6 +332,7 @@ def compute_cox_quantities(
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
 ):
+    """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     n, k = X.shape
 
     c = _compute_risk_sum_sets(
@@ -420,7 +421,11 @@ def newton_raphson_cox(
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],
 ) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, int]:
-    # beta, loglik, fisher_info, max_iter, status
+    """
+    JIT-compiled Newton-Raphson solver for Firth Cox proportional hazards.
+
+    Returns (beta, loglik, fisher_info, max_iter, status)
+    """
     (
         wX,
         S0_cumsum,
@@ -590,7 +595,12 @@ def constrained_lrt_1df_cox(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],
-) -> tuple[float, int, int]:
+) -> tuple[float, int, int]:  # loglik, iteration, status
+    """
+    Fit constrained model with beta[idx]=0 for likelihood ratio test.
+
+    Returns (loglik, n_iter, status)
+    """
     (
         wX,
         S0_cumsum,
@@ -773,3 +783,258 @@ def constrained_lrt_1df_cox(
                 return loglik, iteration, _STATUS_STEP_HALVING_FAILED
 
     return loglik, max_iter, _STATUS_MAX_ITER
+
+
+@njit(fastmath=True, cache=True)
+def profile_ci_bound_cox(
+    X: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    block_d: NDArray[np.int64],
+    block_s: NDArray[np.float64],
+    idx: int,
+    theta_hat: NDArray[np.float64],
+    l_star: float,
+    which: int,
+    chi2_crit: float,
+    max_iter: int,
+    tol: float,
+    D0: NDArray[np.float64],
+    workspace: tuple[NDArray[np.float64], ...],
+) -> tuple[float, int, int]:  # bound, converged, iter
+    """Compute one profile likelihood CI bound using Venzon-Moolgavkar algorithm."""
+    (
+        wX,
+        S0_cumsum,
+        S1_cumsum,
+        S2_cumsum,
+        wXh,
+        A_cumsum,
+        B_cumsum,
+    ) = workspace
+
+    n, k = X.shape
+    theta = theta_hat.copy()
+
+    beta = np.zeros(k, dtype=np.float64)
+    eta = np.empty(n, dtype=np.float64)
+    risk = np.empty(n, dtype=np.float64)
+    fisher_info = _alloc_f_order(k, k)
+    fisher_work = _alloc_f_order(k, k)
+    XI = np.empty((n, k), dtype=np.float64)
+    h = np.empty(n, dtype=np.float64)
+    modified_score = np.empty(k, dtype=np.float64)
+    x_bar = np.empty(k, dtype=np.float64)
+    Ix = np.empty(k, dtype=np.float64)
+    term1 = np.empty(k, dtype=np.float64)
+    term23 = np.empty(k, dtype=np.float64)
+
+    other_idx = np.empty(k - 1, dtype=np.intp)
+    pos = 0
+    for j in range(k):
+        if j != idx:
+            other_idx[pos] = j
+            pos += 1
+
+    # Appendix step 2: compute dw/dbeta and h
+    if k > 1:
+        D0_ww = np.empty((k - 1, k - 1), dtype=np.float64)
+        D0_bw = np.empty((k - 1), dtype=np.float64)
+        for i in range(k - 1):
+            ii = other_idx[i]
+            D0_bw[i] = D0[idx, ii]
+            for j in range(k - 1):
+                jj = other_idx[j]
+                D0_ww[i, j] = D0[ii, jj]
+        sign, logdet = np.linalg.slogdet(D0_ww)
+        if sign != 0 and np.isfinite(logdet):
+            dw_db = -np.linalg.solve(D0_ww, D0_bw)
+        else:
+            dw_db = -np.linalg.lstsq(D0_ww, D0_bw)[0]
+
+        d2l_db2 = D0[idx, idx]
+        for i in range(k - 1):
+            d2l_db2 += D0_bw[i] * dw_db[i]
+    else:  # single parameter case
+        dw_db = np.empty(0, dtype=np.float64)
+        d2l_db2 = D0[idx, idx]
+
+    if d2l_db2 >= 0.0:
+        h_step = which * 0.5
+    else:
+        h_step = which * np.sqrt(chi2_crit / abs(d2l_db2)) / 2.0
+
+    # Appendix step 3: theta(1) = theta_hat + h * [1, dw/dbeta]' (Eq. 4)
+    tangent = np.zeros(k, dtype=np.float64)
+    tangent[idx] = 1.0
+    if k > 1:
+        for i in range(k - 1):
+            tangent[other_idx[i]] = dw_db[i]
+
+    for i in range(k):
+        theta[i] += h_step * tangent[i]
+
+    F = np.empty(k, dtype=np.float64)
+    D = np.empty((k, k), dtype=np.float64)
+    G = _alloc_f_order(k, k)
+    ipiv = np.zeros(k, dtype=BLAS_INT_DTYPE)
+    rhs = _alloc_f_order(k, 2)
+    v = np.empty(k, dtype=np.float64)
+    g_j = np.empty(k, dtype=np.float64)
+    Dg = np.empty(k, dtype=np.float64)
+    Dv = np.empty(k, dtype=np.float64)
+    step1 = np.empty(k, dtype=np.float64)
+    step2 = np.empty(k, dtype=np.float64)
+    temp = np.empty(k, dtype=np.float64)
+
+    # Appendix steps 4-9: Modified Newton-Raphson
+    for iteration in range(1, max_iter + 1):
+        # Appendix step 4: compute score and Hessian at theta(i)
+        loglik = compute_cox_quantities(
+            X=X,
+            block_ends=block_ends,
+            block_d=block_d,
+            block_s=block_s,
+            beta=theta,
+            eta=eta,
+            risk=risk,
+            wX=wX,
+            S0_cumsum=S0_cumsum,
+            S1_cumsum=S1_cumsum,
+            S2_cumsum=S2_cumsum,
+            fisher_info=fisher_info,
+            fisher_work=fisher_work,
+            XI=XI,
+            h=h,
+            wXh=wXh,
+            A_cumsum=A_cumsum,
+            B_cumsum=B_cumsum,
+            modified_score=modified_score,
+            x_bar=x_bar,
+            Ix=Ix,
+            term1=term1,
+            term23=term23,
+        )
+
+        # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
+        for i in range(k):
+            F[i] = modified_score[i]
+        F[idx] = loglik - l_star
+
+        # Appendix step 9: check convergence
+        # TODO: the paper checks for relative change in loglik and the coefficients
+        # between iterations. We're checking |loglik-l_star| directly, and the
+        # |scores| of the nuisance parameters.
+        if max_abs(F) <= tol:
+            return theta[idx], _STATUS_CONVERGED, iteration
+
+        # D = d2l/dtheta2 at current theta (Appendix step 4)
+        for i in range(k):
+            for j in range(k):
+                val = -fisher_info[i, j]
+                D[i, j] = val
+                G[i, j] = val
+
+        for j in range(k):
+            G[idx, j] = modified_score[j]
+
+        # Appendix step 6: v = G^-1 F (direction to subtract)
+        for i in range(k):
+            ipiv[i] = 0
+
+        info = dgetrf(G, ipiv)
+        if info == 0:
+            # Solve G * [v, g_j] = [F, e_idx] without forming G^-1.
+            for i in range(k):
+                rhs[i, 0] = F[i]
+                rhs[i, 1] = 0.0
+            rhs[idx, 1] = 1.0
+            info = dgetrs(G, ipiv, rhs)
+            if info == 0:
+                for i in range(k):
+                    v[i] = rhs[i, 0]
+                    g_j[i] = rhs[i, 1]
+
+        if info != 0:
+            # dgetrf or dgetrs failed; reconstruct G from D and use lstsq
+            for i in range(k):
+                for j in range(k):
+                    G[i, j] = D[i, j]
+            for j in range(k):
+                G[idx, j] = modified_score[j]
+            v[:] = np.linalg.lstsq(G, F)[0]
+            e_idx_vec = np.zeros(k, dtype=np.float64)
+            e_idx_vec[idx] = 1.0
+            g_j[:] = np.linalg.lstsq(G, e_idx_vec)[0]
+
+        # Appendix step 7: quadratic correction
+        # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)
+        # g_j solves G * g_j = e_idx
+        # a = g_j @ D @ g_j
+        # b = 2 * v @ D @ g_j - 2
+        # c = v @ D @ v
+
+        for i in range(k):
+            total = 0.0
+            for j in range(k):
+                total += D[i, j] * g_j[j]
+            Dg[i] = total
+
+        a = 0.0
+        for i in range(k):
+            a += g_j[i] * Dg[i]
+
+        for i in range(k):
+            total = 0.0
+            for j in range(k):
+                total += D[i, j] * v[j]
+            Dv[i] = total
+
+        vDg = 0.0
+        for i in range(k):
+            vDg += v[i] * Dg[i]
+        b = 2.0 * vDg - 2.0
+
+        c = 0.0
+        for i in range(k):
+            c += v[i] * Dv[i]
+
+        discriminant = b * b - 4.0 * a * c
+
+        if discriminant >= 0.0 and abs(a) > 1e-10:
+            sqrt_disc = np.sqrt(discriminant)
+            s1 = (-b + sqrt_disc) / (2.0 * a)
+            s2 = (-b - sqrt_disc) / (2.0 * a)
+
+            for i in range(k):
+                step1[i] = -v[i] - s1 * g_j[i]
+                step2[i] = -v[i] - s2 * g_j[i]
+
+            for i in range(k):
+                total = 0.0
+                for j in range(k):
+                    total += -D0[i, j] * step1[j]
+                temp[i] = total
+            norm1 = 0.0
+            for i in range(k):
+                norm1 += step1[i] * temp[i]
+
+            for i in range(k):
+                total = 0.0
+                for j in range(k):
+                    total += -D0[i, j] * step2[j]
+                temp[i] = total
+            norm2 = 0.0
+            for i in range(k):
+                norm2 += step2[i] * temp[i]
+
+            if norm1 < norm2:
+                for i in range(k):
+                    theta[i] += step1[i]
+            else:
+                for i in range(k):
+                    theta[i] += step2[i]
+        else:
+            for i in range(k):
+                theta[i] -= 0.1 * v[i]
+
+    return theta[idx], _STATUS_MAX_ITER, max_iter

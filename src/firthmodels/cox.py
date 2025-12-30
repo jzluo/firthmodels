@@ -23,10 +23,11 @@ if NUMBA_AVAILABLE:
         constrained_lrt_1df_cox,
         newton_raphson_cox,
         precompute_cox,
+        profile_ci_bound_cox,
     )
 
 from firthmodels._lrt import LRTResult, constrained_lrt_1df
-from firthmodels._profile_ci import profile_ci_bound
+from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
 from firthmodels._utils import FirthResult, resolve_feature_indices
 
@@ -442,17 +443,41 @@ class FirthCoxPH(BaseEstimator):
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
-                        result = profile_ci_bound(
-                            idx=idx,
-                            theta_hat=theta_hat,
-                            l_star=l_star,
-                            which=which,
-                            max_iter=max_iter,
-                            tol=tol,
-                            chi2_crit=chi2_crit,
-                            compute_quantities_full=compute_quantities_full,
-                            D0=D0,
-                        )
+                        if self._resolve_backend() == "numba":
+                            bound, converged, iterations = profile_ci_bound_cox(
+                                X=self._precomputed.X,
+                                block_ends=self._precomputed.block_ends,
+                                block_d=self._precomputed.block_d,
+                                block_s=self._precomputed.block_s,
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                chi2_crit=chi2_crit,
+                                max_iter=max_iter,
+                                tol=tol,
+                                D0=D0,
+                                workspace=self._workspace.numba_buffers(),
+                            )
+
+                            result = ProfileCIBoundResult(
+                                bound=bound,
+                                converged=converged == _STATUS_CONVERGED,
+                                n_iter=iterations,
+                            )
+
+                        else:
+                            result = profile_ci_bound(
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                max_iter=max_iter,
+                                tol=tol,
+                                chi2_crit=chi2_crit,
+                                compute_quantities_full=compute_quantities_full,
+                                D0=D0,
+                            )
 
                         if result.converged:
                             ci[idx, bound_idx] = result.bound
