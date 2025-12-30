@@ -765,6 +765,11 @@ class _Workspace:
         "A_cumsum",
         "B_cumsum",
         "eye_k",
+        "eta",
+        "risk",
+        "XI",
+        "h",
+        "fisher_info",
     )
 
     def __init__(self, n_samples: int, n_features: int) -> None:
@@ -777,6 +782,11 @@ class _Workspace:
         self.A_cumsum = np.empty((n, k), dtype=np.float64)
         self.B_cumsum = np.empty(n, dtype=np.float64)
         self.eye_k = np.eye(k, dtype=np.float64, order="F")
+        self.eta = np.empty(n, dtype=np.float64)
+        self.risk = np.empty(n, dtype=np.float64)
+        self.XI = np.empty((n, k), dtype=np.float64)
+        self.h = np.empty(n, dtype=np.float64)
+        self.fisher_info = np.empty((k, k), dtype=np.float64, order="F")
 
     def numba_buffers(self):  # for numba
         return (
@@ -787,6 +797,11 @@ class _Workspace:
             self.wXh,
             self.A_cumsum,
             self.B_cumsum,
+            # self.eta,
+            # self.risk,
+            # self.XI,
+            # self.h,
+            # self.fisher_info
         )
 
 
@@ -821,13 +836,14 @@ def compute_cox_quantities(
 
     # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
     # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
-    eta = X @ beta
-    c = np.max(eta)
-    risk = np.exp(eta - c)
+    np.matmul(X, beta, out=ws.eta)
+    c = ws.eta.max()
+    np.subtract(ws.eta, c, out=ws.risk)
+    np.exp(ws.risk, out=ws.risk)
 
     # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
-    np.multiply(X, risk[:, None], out=ws.wX)
-    np.cumsum(risk, out=ws.S0_cumsum)
+    np.multiply(X, ws.risk[:, None], out=ws.wX)
+    np.cumsum(ws.risk, out=ws.S0_cumsum)
     np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
     np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
     np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
@@ -860,10 +876,10 @@ def compute_cox_quantities(
     # Section 2: each event time contributes d_j times the weighted covariance of X
     # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
     V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
-    fisher_info = np.einsum("b,brt->rt", d_events, V)
+    np.einsum("b,brt->rt", d_events, V, out=ws.fisher_info)
 
     try:
-        L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+        L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrf failed")
 
@@ -873,23 +889,23 @@ def compute_cox_quantities(
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
-        sign, logdet = np.linalg.slogdet(fisher_info)
+        sign, logdet = np.linalg.slogdet(ws.fisher_info)
         if sign <= 0:
             logdet = -np.inf
-        inv_fisher_info = np.linalg.pinv(fisher_info)
+        inv_fisher_info = np.linalg.pinv(ws.fisher_info)
 
     # avoid O(n k^3) S3 tensor by swapping the summation order:
     # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
     # where h[i] = X[i] @ I_inv @ X[i] is the hat matrix diagonal.
-    XI = X @ inv_fisher_info
-    h = np.einsum("ij,ij->i", XI, X)
+    np.matmul(X, inv_fisher_info, out=ws.XI)
+    np.einsum("ij,ij->i", ws.XI, X, out=ws.h)
 
     # Cumulative sums for the contracted S3 term and trace term
     # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
     # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
-    np.multiply(ws.wX, h[:, None], out=ws.wXh)
+    np.multiply(ws.wX, ws.h[:, None], out=ws.wXh)
     np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
-    np.cumsum(risk * h, out=ws.B_cumsum)
+    np.cumsum(ws.risk * ws.h, out=ws.B_cumsum)
 
     # Index at event block boundaries
     event_block_indices = block_end_indices[event_mask]
@@ -915,7 +931,7 @@ def compute_cox_quantities(
     return CoxQuantities(
         loglik=loglik,
         modified_score=modified_score,
-        fisher_info=fisher_info,
+        fisher_info=ws.fisher_info,
     )
 
 
