@@ -231,29 +231,31 @@ def _compute_firth_correction(
         B_cumsum,
         eta,
         risk,
-        XI,
         h,
         fisher_info,
     ) = workspace
 
     n, k = X.shape
+    # using Ix as a scratch buffer
+    tmp_k = Ix
 
     # XI = X @ inv_fisher_info
+    # h = np.einsum("ij,ij->i", XI, X)
     # TODO: benchmark BLAS-based XI/Ix (with transa using X.T or F-order X) vs loops.
     # since X is C-order, we would need to add a transa option to the dgemm wrapper.
     # just use loops for now
+
+    # compute h without storing XI
     for i in range(n):
         for j in range(k):
             total = 0.0
             for r in range(k):
                 total += X[i, r] * fisher_inv[r, j]
-            XI[i, j] = total
+            tmp_k[j] = total
 
-    # h = np.einsum("ij,ij->i", XI, X)
-    for i in range(n):
         total = 0.0
         for j in range(k):
-            total += XI[i, j] * X[i, j]
+            total += tmp_k[j] * X[i, j]
         h[i] = total
 
     # np.multiply(ws.wX, h[:, None], out=ws.wXh)
@@ -346,7 +348,6 @@ def compute_cox_quantities(
         B_cumsum,
         eta,
         risk,
-        XI,
         h,
         fisher_info,
     ) = workspace
@@ -443,7 +444,6 @@ def newton_raphson_cox(
         B_cumsum,
         eta,
         risk,
-        XI,
         h,
         fisher_info,
     ) = workspace
@@ -600,7 +600,6 @@ def constrained_lrt_1df_cox(
         B_cumsum,
         eta,
         risk,
-        XI,
         h,
         fisher_info,
     ) = workspace
@@ -769,7 +768,6 @@ def profile_ci_bound_cox(
         B_cumsum,
         eta,
         risk,
-        XI,
         h,
         fisher_info,
     ) = workspace
