@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Literal, Self, Sequence, cast
@@ -12,10 +13,24 @@ from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
 
-from firthmodels._lrt import constrained_lrt_1df
-from firthmodels._profile_ci import profile_ci_bound
+from firthmodels import NUMBA_AVAILABLE
+
+if NUMBA_AVAILABLE:
+    from firthmodels._numba.cox import (
+        _STATUS_CONVERGED,
+        _STATUS_MAX_ITER,
+        _STATUS_STEP_HALVING_FAILED,
+        concordance_index,
+        constrained_lrt_1df_cox,
+        newton_raphson_cox,
+        precompute_cox,
+        profile_ci_bound_cox,
+    )
+
+from firthmodels._lrt import LRTResult, constrained_lrt_1df
+from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import resolve_feature_indices
+from firthmodels._utils import FirthResult, resolve_feature_indices
 
 
 class FirthCoxPH(BaseEstimator):
@@ -24,6 +39,12 @@ class FirthCoxPH(BaseEstimator):
 
     Parameters
     ----------
+    backend : {'auto', 'numba', 'numpy'}, default='auto'
+        Computational backend to use.
+        - 'auto': uses the Numba implementation when available, otherwise falls back to
+          the NumPy/SciPy path.
+        - 'numba': forces the Numba backend (raises ImportError if Numba isn't installed).
+        - 'numpy': forces the NumPy/SciPy implementation.
     max_iter : int, default=50
         Maximum number of Newton-Raphson iterations.
     max_step : float, default=5.0
@@ -74,17 +95,32 @@ class FirthCoxPH(BaseEstimator):
 
     def __init__(
         self,
+        backend: Literal["auto", "numba", "numpy"] = "auto",
         max_iter: int = 50,
         max_step: float = 5.0,
         max_halfstep: int = 5,
         gtol: float = 1e-4,
         xtol: float = 1e-6,
     ) -> None:
+        self.backend = backend
         self.max_iter = max_iter
         self.max_step = max_step
         self.max_halfstep = max_halfstep
         self.gtol = gtol
         self.xtol = xtol
+
+    def _resolve_backend(self) -> Literal["numba", "numpy"]:
+        if self.backend == "auto":
+            return "numba" if NUMBA_AVAILABLE else "numpy"
+        if self.backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
+            return "numba"
+        if self.backend == "numpy":
+            return "numpy"
+        raise ValueError(
+            f"backend must be 'auto', 'numba', or 'numpy', got '{self.backend}'"
+        )
 
     def fit(self, X: ArrayLike, y: ArrayLike) -> Self:
         """
@@ -110,29 +146,68 @@ class FirthCoxPH(BaseEstimator):
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
 
+        backend = self._resolve_backend()
         # Precompute sorted data and block structure
-        precomputed = _CoxPrecomputed.from_data(X, time, event)
+        precomputed = _CoxPrecomputed.from_data(X, time, event, backend=backend)
         workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
-        # Create closure for newton_raphson
-        def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-            return compute_cox_quantities(beta, precomputed, workspace)
+        if backend == "numba":
+            beta, loglik, fisher_info, n_iter, status = newton_raphson_cox(
+                X=precomputed.X,
+                block_ends=precomputed.block_ends,
+                block_d=precomputed.block_d,
+                block_s=precomputed.block_s,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=workspace.numba_buffers(),
+            )
 
-        # Run optimizer
-        result = newton_raphson(
-            compute_quantities=quantities,
-            n_features=precomputed.n_features,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+
+            result = FirthResult(
+                beta=beta,
+                loglik=loglik,
+                fisher_info=fisher_info,
+                n_iter=n_iter,
+                converged=status == _STATUS_CONVERGED,
+            )
+
+            self.converged_ = result.converged
+
+        else:  # numpy backend
+            # Create closure for newton_raphson
+            def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
+                return compute_cox_quantities(beta, precomputed, workspace)
+
+            # Run optimizer
+            result = newton_raphson(
+                compute_quantities=quantities,
+                n_features=precomputed.n_features,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
+            self.converged_ = result.converged
 
         self.coef_ = result.beta
         self.loglik_ = result.loglik
         self.n_iter_ = result.n_iter
-        self.converged_ = result.converged
 
         # Wald
         try:
@@ -216,24 +291,61 @@ class FirthCoxPH(BaseEstimator):
             Index of the coefficient to test.
         """
 
-        def compute_quantities_full(beta):
-            return compute_cox_quantities(
-                beta=beta, precomputed=self._precomputed, workspace=self._workspace
+        if self._resolve_backend() == "numba":
+            constrained_loglik, n_iter, status = constrained_lrt_1df_cox(
+                X=self._precomputed.X,
+                block_ends=self._precomputed.block_ends,
+                block_d=self._precomputed.block_d,
+                block_s=self._precomputed.block_s,
+                idx=idx,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+                workspace=self._workspace.numba_buffers(),
             )
 
-        beta_hat_full = self.coef_
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=3,
+                )
 
-        result = constrained_lrt_1df(
-            idx=idx,
-            beta_hat_full=beta_hat_full,
-            loglik_full=self.loglik_,
-            compute_quantities_full=compute_quantities_full,
-            max_iter=self.max_iter,
-            max_step=self.max_step,
-            max_halfstep=self.max_halfstep,
-            gtol=self.gtol,
-            xtol=self.xtol,
-        )
+            chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
+            pval = scipy.stats.chi2.sf(chi2, df=1)
+
+            # back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
+            bse = abs(self.coef_[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
+            result = LRTResult(chi2=chi2, pvalue=pval, bse_backcorrected=bse)
+
+        else:
+
+            def compute_quantities_full(beta):
+                return compute_cox_quantities(
+                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                )
+
+            beta_hat_full = self.coef_
+
+            result = constrained_lrt_1df(
+                idx=idx,
+                beta_hat_full=beta_hat_full,
+                loglik_full=self.loglik_,
+                compute_quantities_full=compute_quantities_full,
+                max_iter=self.max_iter,
+                max_step=self.max_step,
+                max_halfstep=self.max_halfstep,
+                gtol=self.gtol,
+                xtol=self.xtol,
+            )
 
         self.lrt_pvalues_[idx] = result.pvalue
         self.lrt_bse_[idx] = result.bse_backcorrected
@@ -358,17 +470,41 @@ class FirthCoxPH(BaseEstimator):
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
-                        result = profile_ci_bound(
-                            idx=idx,
-                            theta_hat=theta_hat,
-                            l_star=l_star,
-                            which=which,
-                            max_iter=max_iter,
-                            tol=tol,
-                            chi2_crit=chi2_crit,
-                            compute_quantities_full=compute_quantities_full,
-                            D0=D0,
-                        )
+                        if self._resolve_backend() == "numba":
+                            bound, converged, iterations = profile_ci_bound_cox(
+                                X=self._precomputed.X,
+                                block_ends=self._precomputed.block_ends,
+                                block_d=self._precomputed.block_d,
+                                block_s=self._precomputed.block_s,
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                chi2_crit=chi2_crit,
+                                max_iter=max_iter,
+                                tol=tol,
+                                D0=D0,
+                                workspace=self._workspace.numba_buffers(),
+                            )
+
+                            result = ProfileCIBoundResult(
+                                bound=bound,
+                                converged=converged == _STATUS_CONVERGED,
+                                n_iter=iterations,
+                            )
+
+                        else:
+                            result = profile_ci_bound(
+                                idx=idx,
+                                theta_hat=theta_hat,
+                                l_star=l_star,
+                                which=which,
+                                max_iter=max_iter,
+                                tol=tol,
+                                chi2_crit=chi2_crit,
+                                compute_quantities_full=compute_quantities_full,
+                                D0=D0,
+                            )
 
                         if result.converged:
                             ci[idx, bound_idx] = result.bound
@@ -399,7 +535,9 @@ class FirthCoxPH(BaseEstimator):
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
         risk = self.predict(X)
-        return _concordance_index(event, time, risk)
+        if self._resolve_backend() == "numba":
+            return concordance_index(event, time, risk)
+        return _concordance_index(event, time, risk)  # numpy
 
     def predict_cumulative_hazard_function(
         self, X: ArrayLike, return_array: bool = True
@@ -494,6 +632,7 @@ class _CoxPrecomputed:
         X: NDArray[np.float64],
         time: NDArray[np.float64],
         event: NDArray[np.bool_],
+        backend: Literal["numba", "numpy"] = "numpy",
     ) -> Self:
         """
         Sort samples and compute block structure.
@@ -512,6 +651,21 @@ class _CoxPrecomputed:
         _CoxPrecomputed
             Precomputed data for likelihood evaluation.
         """
+        if backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
+            X, time, event, block_ends, block_d, block_s = precompute_cox(
+                X, time, event
+            )
+            return cls(
+                X=X,
+                time=time,
+                event=event,
+                block_ends=block_ends,
+                block_d=block_d,
+                block_s=block_s,
+            )
+
         # d = number of deaths at time t
         # s = vector sum of the covariates of the d individuals
         n, k = X.shape
@@ -531,7 +685,7 @@ class _CoxPrecomputed:
 
         # Compute per-block event counts and covariate sums
         n_blocks = len(block_ends)
-        block_d = np.zeros(n_blocks, dtype=np.intp)
+        block_d = np.zeros(n_blocks, dtype=np.int64)
         block_s = np.zeros((n_blocks, k), dtype=np.float64)
 
         start = 0
@@ -642,6 +796,11 @@ class _Workspace:
         "A_cumsum",
         "B_cumsum",
         "eye_k",
+        "eta",
+        "risk",
+        "XI",
+        "h",
+        "fisher_info",
     )
 
     def __init__(self, n_samples: int, n_features: int) -> None:
@@ -654,6 +813,26 @@ class _Workspace:
         self.A_cumsum = np.empty((n, k), dtype=np.float64)
         self.B_cumsum = np.empty(n, dtype=np.float64)
         self.eye_k = np.eye(k, dtype=np.float64, order="F")
+        self.eta = np.empty(n, dtype=np.float64)
+        self.risk = np.empty(n, dtype=np.float64)
+        self.XI = np.empty((n, k), dtype=np.float64)
+        self.h = np.empty(n, dtype=np.float64)
+        self.fisher_info = np.empty((k, k), dtype=np.float64, order="F")
+
+    def numba_buffers(self):  # for numba
+        return (
+            self.wX,
+            self.S0_cumsum,
+            self.S1_cumsum,
+            self.S2_cumsum,
+            self.wXh,
+            self.A_cumsum,
+            self.B_cumsum,
+            self.eta,
+            self.risk,
+            self.h,
+            self.fisher_info,
+        )
 
 
 def compute_cox_quantities(
@@ -687,13 +866,14 @@ def compute_cox_quantities(
 
     # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
     # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
-    eta = X @ beta
-    c = np.max(eta)
-    risk = np.exp(eta - c)
+    np.matmul(X, beta, out=ws.eta)
+    c = ws.eta.max()
+    np.subtract(ws.eta, c, out=ws.risk)
+    np.exp(ws.risk, out=ws.risk)
 
     # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
-    np.multiply(X, risk[:, None], out=ws.wX)
-    np.cumsum(risk, out=ws.S0_cumsum)
+    np.multiply(X, ws.risk[:, None], out=ws.wX)
+    np.cumsum(ws.risk, out=ws.S0_cumsum)
     np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
     np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
     np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
@@ -726,10 +906,10 @@ def compute_cox_quantities(
     # Section 2: each event time contributes d_j times the weighted covariance of X
     # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
     V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
-    fisher_info = np.einsum("b,brt->rt", d_events, V)
+    np.einsum("b,brt->rt", d_events, V, out=ws.fisher_info)
 
     try:
-        L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
+        L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrf failed")
 
@@ -739,23 +919,23 @@ def compute_cox_quantities(
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
-        sign, logdet = np.linalg.slogdet(fisher_info)
+        sign, logdet = np.linalg.slogdet(ws.fisher_info)
         if sign <= 0:
             logdet = -np.inf
-        inv_fisher_info = np.linalg.pinv(fisher_info)
+        inv_fisher_info = np.linalg.pinv(ws.fisher_info)
 
     # avoid O(n k^3) S3 tensor by swapping the summation order:
     # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
     # where h[i] = X[i] @ I_inv @ X[i] is the hat matrix diagonal.
-    XI = X @ inv_fisher_info
-    h = np.einsum("ij,ij->i", XI, X)
+    np.matmul(X, inv_fisher_info, out=ws.XI)
+    np.einsum("ij,ij->i", ws.XI, X, out=ws.h)
 
     # Cumulative sums for the contracted S3 term and trace term
     # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
     # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
-    np.multiply(ws.wX, h[:, None], out=ws.wXh)
+    np.multiply(ws.wX, ws.h[:, None], out=ws.wXh)
     np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
-    np.cumsum(risk * h, out=ws.B_cumsum)
+    np.cumsum(ws.risk * ws.h, out=ws.B_cumsum)
 
     # Index at event block boundaries
     event_block_indices = block_end_indices[event_mask]
@@ -781,7 +961,7 @@ def compute_cox_quantities(
     return CoxQuantities(
         loglik=loglik,
         modified_score=modified_score,
-        fisher_info=fisher_info,
+        fisher_info=ws.fisher_info,
     )
 
 

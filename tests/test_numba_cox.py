@@ -1,6 +1,19 @@
 import numpy as np
 import pytest
 
+from firthmodels import NUMBA_AVAILABLE
+
+if NUMBA_AVAILABLE:
+    from firthmodels._numba.cox import (
+        _STATUS_STEP_HALVING_FAILED,
+        concordance_index,
+        newton_raphson_cox,
+        precompute_cox,
+    )
+    from firthmodels._numba.cox import (
+        compute_cox_quantities as compute_cox_quantities_numba,
+    )
+
 from firthmodels.cox import (
     FirthCoxPH,
     _concordance_index,
@@ -10,6 +23,8 @@ from firthmodels.cox import (
     compute_cox_quantities,
 )
 
+pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available")
+
 
 def _structured_y(event: np.ndarray, time: np.ndarray) -> np.ndarray:
     y = np.empty(len(time), dtype=[("event", bool), ("time", np.float64)])
@@ -18,37 +33,8 @@ def _structured_y(event: np.ndarray, time: np.ndarray) -> np.ndarray:
     return y
 
 
-class TestValidateSurvivalY:
-    def test_accepts_structured_array(self):
-        event = np.array([True, False, True])
-        time = np.array([1.0, 2.0, 3.0])
-        y = _structured_y(event, time)
-
-        event_out, time_out = _validate_survival_y(y, n_samples=3)
-
-        assert event_out.dtype == bool
-        assert time_out.dtype == np.float64
-        np.testing.assert_array_equal(event_out, event)
-        np.testing.assert_allclose(time_out, time)
-
-    def test_accepts_tuple_event_time(self):
-        event = np.array([0, 1, 0], dtype=np.int64)
-        time = np.array([5.0, 6.0, 7.0], dtype=np.float64)
-
-        event_out, time_out = _validate_survival_y((event, time), n_samples=3)
-
-        np.testing.assert_array_equal(event_out, np.array([False, True, False]))
-        np.testing.assert_allclose(time_out, time)
-
-    def test_rejects_event_values_not_binary(self):
-        event = np.array([0, 2])
-        time = np.array([1.0, 2.0])
-        with pytest.raises(ValueError, match=r"event must contain only 0/1"):
-            _validate_survival_y((event, time), n_samples=2)
-
-
-class TestCoxPrecomputed:
-    def test_blocks_event_counts_and_sums(self):
+class TestNumbaCoxPrecomputed:
+    def test_blocks_event_counts_and_sums_numba(self):
         X = np.array(
             [
                 [10.0, 1.0],  # time 2, event 1
@@ -62,11 +48,11 @@ class TestCoxPrecomputed:
         time = np.array([2.0, 5.0, 2.0, 5.0, 3.0, 4.0])
         event = np.array([1, 1, 0, 1, 1, 0], dtype=bool)
 
-        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
+        (_, _, _, block_ends, block_d, block_s) = precompute_cox(X, time, event)
 
         # Sorted times: 5,5,4,3,2,2 -> block ends at [2,3,4,6]
-        np.testing.assert_array_equal(pre.block_ends, np.array([2, 3, 4, 6]))
-        np.testing.assert_array_equal(pre.block_d, np.array([2, 0, 1, 1]))
+        np.testing.assert_array_equal(block_ends, np.array([2, 3, 4, 6]))
+        np.testing.assert_array_equal(block_d, np.array([2, 0, 1, 1]))
 
         expected_block_s = np.array(
             [
@@ -76,7 +62,7 @@ class TestCoxPrecomputed:
                 [10.0, 1.0],  # time 2: row [10,1]
             ]
         )
-        np.testing.assert_allclose(pre.block_s, expected_block_s)
+        np.testing.assert_array_equal(block_s, expected_block_s)
 
 
 class TestFirthCoxPH:
@@ -88,7 +74,7 @@ class TestFirthCoxPH:
         event = np.array([True, False])
         y = _structured_y(event, time)
 
-        model = FirthCoxPH(backend="numpy")
+        model = FirthCoxPH(backend="numba")
         model.fit(X, y)
 
         assert model.converged_
@@ -103,7 +89,7 @@ class TestFirthCoxPH:
         event = np.array([True, False])
         y = _structured_y(event, time)
 
-        model = FirthCoxPH(backend="numpy").fit(X, y)
+        model = FirthCoxPH(backend="numba").fit(X, y)
 
         np.testing.assert_array_equal(model.unique_times_, [1.0])
         np.testing.assert_allclose(model.cum_baseline_hazard_, [0.25], rtol=1e-6)
@@ -116,7 +102,7 @@ class TestFirthCoxPH:
         X, time, event = cox_separation_data
         y = _structured_y(event, time)
 
-        model = FirthCoxPH(backend="numpy")
+        model = FirthCoxPH(backend="numba")
         model.fit(X, y)
 
         expected_coef = np.array(
@@ -133,7 +119,7 @@ class TestFirthCoxPH:
 
         # Absolute penalized log-likelihoods differ with coxphf by an
         # additive constant. Compare likelihood ratios instead.
-        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numba")
         ws = _Workspace(pre.n_samples, pre.n_features)
         null_loglik = compute_cox_quantities(np.zeros(X.shape[1]), pre, ws).loglik
         lr_stat = 2.0 * (model.loglik_ - null_loglik)
@@ -165,17 +151,75 @@ class TestFirthCoxPH:
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
 
 
-class TestConcordanceIndex:
-    def test_counts_concordant_discordant_pairs(self):
+class TestNewtonRaphsonCox:
+    def test_step_halving_failure_returns_consistent_fisher_info(self):
+        # Dataset chosen to deterministically hit the step-halving failure path.
+        # seed=0 with these parameters triggers failure at iteration 12.
+        np.random.seed(0)
+        n, k = 10, 2
+        X = np.random.randn(n, k) * 3
+        time = np.abs(np.random.randn(n)) + 0.1
+        event = np.random.randint(0, 2, n).astype(bool)
+        event[0] = True  # ensure at least one event
+
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numba")
+        workspace = _Workspace(pre.n_samples, pre.n_features)
+
+        beta, loglik, fisher_info, n_iter, status = newton_raphson_cox(
+            X=pre.X,
+            block_ends=pre.block_ends,
+            block_d=pre.block_d,
+            block_s=pre.block_s,
+            max_iter=50,
+            max_step=5.0,
+            max_halfstep=2,
+            gtol=1e-10,
+            xtol=1e-10,
+            workspace=workspace.numba_buffers(),
+        )
+        assert status == _STATUS_STEP_HALVING_FAILED
+        fisher_info = fisher_info.copy()
+
+        # Recompute quantities for the returned beta to verify the returned
+        # fisher_info corresponds to the accepted (not rejected) beta.
+        ref_workspace = _Workspace(pre.n_samples, pre.n_features)
+        fisher_work = np.empty((k, k), dtype=np.float64, order="F")
+        modified_score = np.empty(k, dtype=np.float64)
+        x_bar = np.empty(k, dtype=np.float64)
+        Ix = np.empty(k, dtype=np.float64)
+        term1 = np.empty(k, dtype=np.float64)
+        term23 = np.empty(k, dtype=np.float64)
+
+        loglik_ref = compute_cox_quantities_numba(
+            X=pre.X,
+            block_ends=pre.block_ends,
+            block_d=pre.block_d,
+            block_s=pre.block_s,
+            beta=beta,
+            fisher_work=fisher_work,
+            modified_score=modified_score,
+            x_bar=x_bar,
+            Ix=Ix,
+            term1=term1,
+            term23=term23,
+            workspace=ref_workspace.numba_buffers(),
+        )
+
+        np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)
+        np.testing.assert_allclose(ref_workspace.fisher_info, fisher_info, rtol=1e-10)
+
+
+class TestNumbaConcordanceIndex:
+    def test_counts_concordant_discordant_pairs_numba(self):
         # 2 concordant, 1 discordant -> C = 2/3
         event = np.array([True, True, True])
         time = np.array([1.0, 2.0, 3.0])
         risk = np.array([2.0, 3.0, 1.0])
-        np.testing.assert_allclose(_concordance_index(event, time, risk), 2 / 3)
+        np.testing.assert_allclose(concordance_index(event, time, risk), 2 / 3)
 
-    def test_event_and_censor_at_same_time_are_comparable(self):
+    def test_event_and_censor_at_same_time_are_comparable_numba(self):
         # Event at t=1, censor at t=1: the event is observed, so comparable
         event = np.array([True, False])
         time = np.array([1.0, 1.0])
         risk = np.array([2.0, 1.0])
-        assert _concordance_index(event, time, risk) == 1.0
+        assert concordance_index(event, time, risk) == 1.0
