@@ -551,6 +551,21 @@ def newton_raphson_cox(
                 step_factor *= 0.5
 
             if not accepted:
+                # recompute quantities at the last accepted beta
+                compute_cox_quantities(
+                    X=X,
+                    block_ends=block_ends,
+                    block_d=block_d,
+                    block_s=block_s,
+                    beta=beta,
+                    fisher_work=fisher_work,
+                    modified_score=modified_score,
+                    x_bar=x_bar,
+                    Ix=Ix,
+                    term1=term1,
+                    term23=term23,
+                    workspace=workspace,
+                )
                 return beta, loglik, fisher_info, iteration, _STATUS_STEP_HALVING_FAILED
 
     return beta, loglik, fisher_info, max_iter, _STATUS_MAX_ITER

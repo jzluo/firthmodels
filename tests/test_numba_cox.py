@@ -4,7 +4,15 @@ import pytest
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.cox import concordance_index, precompute_cox
+    from firthmodels._numba.cox import (
+        _STATUS_STEP_HALVING_FAILED,
+        concordance_index,
+        newton_raphson_cox,
+        precompute_cox,
+    )
+    from firthmodels._numba.cox import (
+        compute_cox_quantities as compute_cox_quantities_numba,
+    )
 
 from firthmodels.cox import (
     FirthCoxPH,
@@ -141,6 +149,64 @@ class TestFirthCoxPH:
         )
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
+
+
+class TestNewtonRaphsonCox:
+    def test_step_halving_failure_returns_consistent_fisher_info(self):
+        # Dataset chosen to deterministically hit the step-halving failure path.
+        # seed=0 with these parameters triggers failure at iteration 12.
+        np.random.seed(0)
+        n, k = 10, 2
+        X = np.random.randn(n, k) * 3
+        time = np.abs(np.random.randn(n)) + 0.1
+        event = np.random.randint(0, 2, n).astype(bool)
+        event[0] = True  # ensure at least one event
+
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numba")
+        workspace = _Workspace(pre.n_samples, pre.n_features)
+
+        beta, loglik, fisher_info, n_iter, status = newton_raphson_cox(
+            X=pre.X,
+            block_ends=pre.block_ends,
+            block_d=pre.block_d,
+            block_s=pre.block_s,
+            max_iter=50,
+            max_step=5.0,
+            max_halfstep=2,
+            gtol=1e-10,
+            xtol=1e-10,
+            workspace=workspace.numba_buffers(),
+        )
+        assert status == _STATUS_STEP_HALVING_FAILED
+        fisher_info = fisher_info.copy()
+
+        # Recompute quantities for the returned beta to verify the returned
+        # fisher_info corresponds to the accepted (not rejected) beta.
+        ref_workspace = _Workspace(pre.n_samples, pre.n_features)
+        fisher_work = np.empty((k, k), dtype=np.float64, order="F")
+        modified_score = np.empty(k, dtype=np.float64)
+        x_bar = np.empty(k, dtype=np.float64)
+        Ix = np.empty(k, dtype=np.float64)
+        term1 = np.empty(k, dtype=np.float64)
+        term23 = np.empty(k, dtype=np.float64)
+
+        loglik_ref = compute_cox_quantities_numba(
+            X=pre.X,
+            block_ends=pre.block_ends,
+            block_d=pre.block_d,
+            block_s=pre.block_s,
+            beta=beta,
+            fisher_work=fisher_work,
+            modified_score=modified_score,
+            x_bar=x_bar,
+            Ix=Ix,
+            term1=term1,
+            term23=term23,
+            workspace=ref_workspace.numba_buffers(),
+        )
+
+        np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)
+        np.testing.assert_allclose(ref_workspace.fisher_info, fisher_info, rtol=1e-10)
 
 
 class TestNumbaConcordanceIndex:
