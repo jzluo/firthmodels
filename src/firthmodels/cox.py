@@ -632,7 +632,7 @@ class _CoxPrecomputed:
         X: NDArray[np.float64],
         time: NDArray[np.float64],
         event: NDArray[np.bool_],
-        backend: Literal["numba", "numpy"] = "numba",
+        backend: Literal["numba", "numpy"] = "numpy",
     ) -> Self:
         """
         Sort samples and compute block structure.
@@ -652,6 +652,8 @@ class _CoxPrecomputed:
             Precomputed data for likelihood evaluation.
         """
         if backend == "numba":
+            if not NUMBA_AVAILABLE:
+                raise ImportError("backend='numba' but numba is not installed.")
             X, time, event, block_ends, block_d, block_s = precompute_cox(
                 X, time, event
             )
