@@ -4,7 +4,7 @@ import pytest
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
-    from firthmodels._numba.cox import precompute_cox
+    from firthmodels._numba.cox import concordance_index, precompute_cox
 
 from firthmodels.cox import (
     FirthCoxPH,
@@ -141,3 +141,19 @@ class TestFirthCoxPH:
         )
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
+
+
+class TestNumbaConcordanceIndex:
+    def test_counts_concordant_discordant_pairs_numba(self):
+        # 2 concordant, 1 discordant -> C = 2/3
+        event = np.array([True, True, True])
+        time = np.array([1.0, 2.0, 3.0])
+        risk = np.array([2.0, 3.0, 1.0])
+        np.testing.assert_allclose(concordance_index(event, time, risk), 2 / 3)
+
+    def test_event_and_censor_at_same_time_are_comparable_numba(self):
+        # Event at t=1, censor at t=1: the event is observed, so comparable
+        event = np.array([True, False])
+        time = np.array([1.0, 1.0])
+        risk = np.array([2.0, 1.0])
+        assert concordance_index(event, time, risk) == 1.0

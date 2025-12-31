@@ -969,3 +969,53 @@ def profile_ci_bound_cox(
                 theta[i] -= 0.1 * v[i]
 
     return theta[idx], _STATUS_MAX_ITER, max_iter
+
+
+@njit(cache=True)
+def concordance_index(
+    event: NDArray[np.bool_],
+    time: NDArray[np.float64],
+    risk: NDArray[np.float64],
+) -> float:
+    """Compute concordance index (C-index) for survival predictions."""
+
+    n = len(time)
+    concordant = 0
+    discordant = 0
+    tied_risk = 0
+
+    # TODO: this is awful
+    for i in range(n):
+        for j in range(i + 1, n):
+            # Determine if pair is comparable and who has shorter survival
+            if event[i] and event[j]:
+                if time[i] == time[j]:
+                    continue  # tied times, not comparable
+                shorter, longer = (i, j) if time[i] < time[j] else (j, i)
+            elif event[i] and not event[j]:
+                # i had event, j censored: comparable if i's event <= j's censoring
+                # (j was at risk when i's event occurred)
+                if time[i] > time[j]:
+                    continue
+                shorter, longer = i, j
+            elif event[j] and not event[i]:
+                # j had event, i censored
+                if time[j] > time[i]:
+                    continue
+                shorter, longer = j, i
+            else:
+                # Both censored: not comparable
+                continue
+
+            # Compare risk scores: higher risk should have shorter survival
+            if risk[shorter] > risk[longer]:
+                concordant += 1
+            elif risk[shorter] < risk[longer]:
+                discordant += 1
+            else:
+                tied_risk += 1
+
+    total = concordant + discordant + tied_risk
+    if total == 0:
+        return 0.5  # no comparable pairs
+    return (concordant + 0.5 * tied_risk) / total

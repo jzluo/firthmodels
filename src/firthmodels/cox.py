@@ -20,6 +20,7 @@ if NUMBA_AVAILABLE:
         _STATUS_CONVERGED,
         _STATUS_MAX_ITER,
         _STATUS_STEP_HALVING_FAILED,
+        concordance_index,
         constrained_lrt_1df_cox,
         newton_raphson_cox,
         precompute_cox,
@@ -508,7 +509,9 @@ class FirthCoxPH(BaseEstimator):
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])
         risk = self.predict(X)
-        return _concordance_index(event, time, risk)
+        if self._resolve_backend() == "numba":
+            return concordance_index(event, time, risk)
+        return _concordance_index(event, time, risk)  # numpy
 
     def predict_cumulative_hazard_function(
         self, X: ArrayLike, return_array: bool = True
