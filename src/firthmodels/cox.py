@@ -152,7 +152,7 @@ class FirthCoxPH(BaseEstimator):
         workspace = _Workspace(precomputed.n_samples, precomputed.n_features)
 
         if backend == "numba":
-            beta, loglik, fisher_info, max_iter, status = newton_raphson_cox(
+            beta, loglik, fisher_info, n_iter, status = newton_raphson_cox(
                 X=precomputed.X,
                 block_ends=precomputed.block_ends,
                 block_d=precomputed.block_d,
@@ -165,15 +165,28 @@ class FirthCoxPH(BaseEstimator):
                 workspace=workspace.numba_buffers(),
             )
 
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=2,
+                )
+
             result = FirthResult(
                 beta=beta,
                 loglik=loglik,
                 fisher_info=fisher_info,
-                n_iter=max_iter,
-                converged=status,
+                n_iter=n_iter,
+                converged=status == _STATUS_CONVERGED,
             )
 
-            self.converged_ = result.converged == _STATUS_CONVERGED
+            self.converged_ = result.converged
 
         else:  # numpy backend
             # Create closure for newton_raphson
@@ -279,7 +292,7 @@ class FirthCoxPH(BaseEstimator):
         """
 
         if self._resolve_backend() == "numba":
-            constrained_loglik, n_iter, converged = constrained_lrt_1df_cox(
+            constrained_loglik, n_iter, status = constrained_lrt_1df_cox(
                 X=self._precomputed.X,
                 block_ends=self._precomputed.block_ends,
                 block_d=self._precomputed.block_d,
@@ -292,6 +305,19 @@ class FirthCoxPH(BaseEstimator):
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
             )
+
+            if status == _STATUS_STEP_HALVING_FAILED:
+                warnings.warn(
+                    "Step-halving failed to converge.",
+                    ConvergenceWarning,
+                    stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
+                )
+            elif status == _STATUS_MAX_ITER:
+                warnings.warn(
+                    "Maximum number of iterations reached without convergence.",
+                    ConvergenceWarning,
+                    stacklevel=3,
+                )
 
             chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
             pval = scipy.stats.chi2.sf(chi2, df=1)
