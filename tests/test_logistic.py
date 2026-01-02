@@ -230,6 +230,14 @@ class TestFirthLogisticRegression:
                 X, y, beta, sample_weight, offset, workspace=ws
             )
 
+    def test_early_rank_check_in_fit(self):
+        X = np.array([[0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+        y = np.array([0, 1, 0])
+        sample_weight = np.array([1.0, 1.0, 0.0])
+
+        with pytest.raises(ValueError, match="effective sample size"):
+            FirthLogisticRegression().fit(X, y, sample_weight=sample_weight)
+
     def test_cholesky_fallback_in_solver(self, separation_data, monkeypatch):
         """Fallback to lstsq in newton_raphson solver produces equivalent results."""
         X, y = separation_data

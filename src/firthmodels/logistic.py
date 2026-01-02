@@ -226,6 +226,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         n_features = X.shape[1]
 
+        # early rank check
+        n_eff = np.count_nonzero(sample_weight > 0)
+        if n_features > n_eff:
+            raise ValueError(
+                f"Number of parameters ({n_features}) exceeds the effective sample size "
+                f"({n_eff})."
+            )
+
         # === run solver ===
         # pre-allocate workspace arrays to reduce allocations
         workspace = _Workspace(n=X.shape[0], k=n_features)
