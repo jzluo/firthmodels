@@ -180,13 +180,13 @@ class TestFirthLogisticRegression:
         X, y = separation_data
         model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
 
-        called = {"dgepq3": 0, "dorgqr": 0}
-        orig_dgepq3 = firthmodels.logistic.dgeqp3
+        called = {"dgeqp3": 0, "dorgqr": 0}
+        orig_dgeqp3 = firthmodels.logistic.dgeqp3
         orig_dorgqr = firthmodels.logistic.dorgqr
 
         def wrapped_dgeqp3(*args, **kwargs):
-            called["dgepq3"] += 1
-            return orig_dgepq3(*args, **kwargs)
+            called["dgeqp3"] += 1
+            return orig_dgeqp3(*args, **kwargs)
 
         def wrapped_dorgqr(*args, **kwargs):
             called["dorgqr"] += 1
@@ -201,7 +201,7 @@ class TestFirthLogisticRegression:
 
         model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
 
-        assert called["dgepq3"] > 0
+        assert called["dgeqp3"] > 0
         assert called["dorgqr"] > 0
         np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
         np.testing.assert_allclose(
