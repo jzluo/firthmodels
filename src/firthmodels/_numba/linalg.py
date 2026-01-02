@@ -47,6 +47,8 @@ _SYMBOLS = {
     "firth_dgetrf": ("scipy.linalg.cython_lapack", "dgetrf"),
     "firth_dgetri": ("scipy.linalg.cython_lapack", "dgetri"),
     "firth_dgetrs": ("scipy.linalg.cython_lapack", "dgetrs"),
+    "firth_dgeqp3": ("scipy.linalg.cython_lapack", "dgeqp3"),
+    "firth_dorgqr": ("scipy.linalg.cython_lapack", "dorgqr"),
 }
 
 for symbol, (module, name) in _SYMBOLS.items():
@@ -153,6 +155,26 @@ def _dgetrs_call(typingctx, trans, n, nrhs, A, lda, ipiv, B, ldb, info):
 
     def codegen(context, builder, signature, args):
         return _external_call_codegen("firth_dgetrs", context, builder, signature, args)
+
+    return sig, codegen
+
+
+@intrinsic
+def _dgeqp3_call(typingctx, m, n, A, lda, jpvt, tau, work, lwork, info):
+    sig = types.void(m, n, A, lda, jpvt, tau, work, lwork, info)
+
+    def codegen(context, builder, signature, args):
+        return _external_call_codegen("firth_dgeqp3", context, builder, signature, args)
+
+    return sig, codegen
+
+
+@intrinsic
+def _dorgqr_call(typingctx, m, n, k, A, lda, tau, work, lwork, info):
+    sig = types.void(m, n, k, A, lda, tau, work, lwork, info)
+
+    def codegen(context, builder, signature, args):
+        return _external_call_codegen("firth_dorgqr", context, builder, signature, args)
 
     return sig, codegen
 
@@ -297,4 +319,35 @@ def dgetrs(A: np.ndarray, ipiv: np.ndarray, B: np.ndarray) -> int:
     info = np.array([0], dtype=BLAS_INT_DTYPE)
 
     _dgetrs_call(trans, n_arr, nrhs_arr, A, lda, ipiv, B, ldb, info)
+    return int(info[0])
+
+
+@njit(cache=True)
+def dgeqp3(A: np.ndarray, jpvt: np.ndarray, tau: np.ndarray, work: np.ndarray) -> int:
+    """QR with column pivoting: A[:,jpvt] = Q @ R. Overwrites A."""
+    m = A.shape[0]
+    n = A.shape[1]
+    m_arr = np.array([m], dtype=BLAS_INT_DTYPE)
+    n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
+    lda = np.array([m], dtype=BLAS_INT_DTYPE)
+    lwork = np.array([work.shape[0]], dtype=BLAS_INT_DTYPE)
+    info = np.array([0], dtype=BLAS_INT_DTYPE)
+
+    _dgeqp3_call(m_arr, n_arr, A, lda, jpvt, tau, work, lwork, info)
+    return int(info[0])
+
+
+@njit(cache=True)
+def dorgqr(A: np.ndarray, tau: np.ndarray, work: np.ndarray, k: int) -> int:
+    """Get Q from QR factorization. A overwritten with first k columns of Q."""
+    m = A.shape[0]
+    n = A.shape[1]
+    m_arr = np.array([m], dtype=BLAS_INT_DTYPE)
+    n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
+    k_arr = np.array([k], dtype=BLAS_INT_DTYPE)
+    lda = np.array([m], dtype=BLAS_INT_DTYPE)
+    lwork = np.array([work.shape[0]], dtype=BLAS_INT_DTYPE)
+    info = np.array([0], dtype=BLAS_INT_DTYPE)
+
+    _dorgqr_call(m_arr, n_arr, k_arr, A, lda, tau, work, lwork, info)
     return int(info[0])
