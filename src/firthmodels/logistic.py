@@ -24,7 +24,9 @@ from firthmodels import NUMBA_AVAILABLE
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         _STATUS_CONVERGED,
+        _STATUS_LINALG_FAIL,
         _STATUS_MAX_ITER,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         constrained_lrt_1df_logistic,
         newton_raphson_logistic,
@@ -199,6 +201,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 sample_weight, X, dtype=np.float64, ensure_non_negative=True
             ),
         )
+        if not np.any(sample_weight[y == 0] > 0) or not np.any(
+            sample_weight[y == 1] > 0
+        ):
+            raise ValueError("Need at least one positive-weight sample in each class.")
+
         if offset is None:
             offset = np.zeros(X.shape[0], dtype=np.float64)
         else:
@@ -248,6 +255,15 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=2,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design matrix is rank deficient."
+                )
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design QR factorization failed."
+                )
+
             result = FirthResult(
                 beta=beta,
                 loglik=loglik,
@@ -417,6 +433,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=3,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design matrix is rank deficient."
+                )
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design QR factorization failed."
+                )
             chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
             pvalue = scipy.stats.chi2.sf(chi2, df=1)
             #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
@@ -554,7 +578,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
                         if self._resolve_backend() == "numba":
-                            bound, converged, iterations = profile_ci_bound_logistic(
+                            bound, status, iterations = profile_ci_bound_logistic(
                                 X=X,
                                 y=y,
                                 sample_weight=sample_weight,
@@ -571,7 +595,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                             )
                             result = ProfileCIBoundResult(
                                 bound=bound,
-                                converged=converged,
+                                converged=(status == _STATUS_CONVERGED),
                                 n_iter=iterations,
                             )
 

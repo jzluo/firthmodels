@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.linalg
 from scipy.special import expit as scipy_expit
 
 from firthmodels import NUMBA_AVAILABLE, FirthLogisticRegression
@@ -11,6 +12,8 @@ pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         _STATUS_CONVERGED,
+        _STATUS_LINALG_FAIL,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         expit,
         log1pexp,
@@ -59,7 +62,7 @@ def test_compute_logistic_quantities():
     ws = _Workspace(n, k)
     ref = compute_logistic_quantities(X, y, beta, sample_weight, offset, ws)
 
-    loglik = compute_logistic_quantities_numba(
+    loglik, status = compute_logistic_quantities_numba(
         X,
         y,
         beta,
@@ -67,57 +70,10 @@ def test_compute_logistic_quantities():
         offset,
         ws.numba_buffers(),
     )
-
+    assert status == 0
     np.testing.assert_allclose(loglik, ref.loglik, rtol=1e-14)
     np.testing.assert_allclose(ws.temp_k, ref.modified_score, rtol=1e-14)
     np.testing.assert_allclose(ws.fisher_info_aug, ref.fisher_info, rtol=1e-14)
-
-
-def test_compute_logistic_quantities_non_pd_symmetrizes():
-    rng = np.random.default_rng(0)
-    n = 12
-    x = rng.standard_normal(n)
-    X = np.column_stack([x, np.zeros_like(x)])  # rank-deficient
-    y = rng.integers(0, 2, n).astype(np.float64)
-    beta = np.zeros(2, dtype=np.float64)
-    sample_weight = np.ones(n, dtype=np.float64)
-    offset = np.zeros(n, dtype=np.float64)
-
-    ws = _Workspace(n, 2)
-    loglik = compute_logistic_quantities_numba(
-        X,
-        y,
-        beta,
-        sample_weight,
-        offset,
-        ws.numba_buffers(),
-    )
-
-    p = scipy_expit(np.zeros(n))
-    w = sample_weight * p * (1.0 - p)
-    XtW = X.T * np.sqrt(w)
-    expected = XtW @ XtW.T
-    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-14)
-    np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
-    assert np.isneginf(loglik)
-
-
-# def test_numba_matches_numpy_on_rank_deficient():
-#     """Numba and numpy backends produce same results on rank-deficient data."""
-#     rng = np.random.default_rng(0)
-#     n = 12
-#     x = rng.standard_normal(n)
-#     X = np.column_stack([x, np.zeros_like(x)])  # rank-deficient
-#     y = rng.integers(0, 2, n).astype(np.float64)
-
-#     model_numpy = FirthLogisticRegression(backend="numpy").fit(X, y)
-#     model_numba = FirthLogisticRegression(backend="numba").fit(X, y)
-
-#     np.testing.assert_allclose(model_numba.coef_, model_numpy.coef_, rtol=1e-14)
-#     np.testing.assert_allclose(
-#         model_numba.intercept_, model_numpy.intercept_, rtol=1e-14
-#     )
-#     assert model_numba.converged_ == model_numpy.converged_
 
 
 def run_both_backends(X, y, sample_weight=None, offset=None, **solver_params):
@@ -192,7 +148,7 @@ class TestNewtonRaphsonNumba:
         ref_workspace = _Workspace(6, 1)
         # Recompute quantities for the returned beta to make sure the returned fisher_info
         # corresponds to the accepted (rather than tried and rejected) beta and loglik
-        loglik_ref = compute_logistic_quantities_numba(
+        loglik_ref, status = compute_logistic_quantities_numba(
             X,
             y,
             beta,
@@ -200,7 +156,7 @@ class TestNewtonRaphsonNumba:
             offset,
             ref_workspace.numba_buffers(),
         )
-
+        assert status == 0
         np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)
         np.testing.assert_allclose(
             ref_workspace.fisher_info_aug, fisher_info, rtol=1e-10
@@ -279,25 +235,34 @@ class TestFirthLogisticRegressionNumba:
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
 
+    def test_numba_symmetrizes_fisher_info_on_cholesky_fail_raises_rank_deficient(self):
+        rng = np.random.default_rng(0)
+        n = 8
+        x = rng.standard_normal(n)
+        X = np.column_stack([x, x])  # rank deficient
+        y = rng.integers(0, 2, n).astype(np.float64)
+        beta = np.zeros(2, dtype=np.float64)
+        sample_weight = np.ones(n, dtype=np.float64)
+        offset = np.zeros(n, dtype=np.float64)
 
-def test_numba_symmetrizes_fisher_info_on_cholesky_fail():
-    rng = np.random.default_rng(0)
-    n = 8
-    x = rng.standard_normal(n)
-    X = np.column_stack([x, x])  # rank deficient
-    y = rng.integers(0, 2, n).astype(np.float64)
-    beta = np.zeros(2, dtype=np.float64)
-    sample_weight = np.ones(n, dtype=np.float64)
-    offset = np.zeros(n, dtype=np.float64)
+        ws = _Workspace(n, 2)
+        loglik, status = compute_logistic_quantities_numba(
+            X, y, beta, sample_weight, offset, ws.numba_buffers()
+        )
+        assert status == _STATUS_RANK_DEFICIENT
+        assert np.isneginf(loglik)
 
-    ws = _Workspace(n, 2)
-    loglik = compute_logistic_quantities_numba(
-        X, y, beta, sample_weight, offset, ws.numba_buffers()
-    )
+        sqrt_w = np.sqrt(sample_weight * 0.25)
+        XtW = X.T * sqrt_w
+        expected = XtW @ XtW.T
+        np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-14)
+        np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
 
-    sqrt_w = np.sqrt(sample_weight * 0.25)
-    XtW = X.T * sqrt_w
-    expected = XtW @ XtW.T
-    np.testing.assert_allclose(ws.fisher_info, expected, rtol=1e-14)
-    np.testing.assert_array_equal(ws.fisher_info, ws.fisher_info.T)
-    assert np.isneginf(loglik)
+    def test_numba_rank_deficient_raises(self):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(8)
+        X = np.column_stack([x, x])
+        y = rng.integers(0, 2, 8)
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            FirthLogisticRegression(backend="numba").fit(X, y)
