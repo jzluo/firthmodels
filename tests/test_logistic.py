@@ -2,9 +2,10 @@ import warnings
 
 import numpy as np
 import pytest
-import scipy
+import scipy.linalg
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
+import firthmodels.logistic
 from firthmodels import FirthLogisticRegression
 
 
@@ -175,25 +176,59 @@ class TestFirthLogisticRegression:
         with pytest.raises(KeyError, match="Unknown feature"):
             model.lrt("nonexistent")
 
-    def test_cholesky_fallback_in_compute_quantities(
-        self, separation_data, monkeypatch
-    ):
-        """Fallback to lstsq in compute_logistic_quantities produces equivalent results."""
-        import scipy.linalg
-
+    def test_qr_fallback_in_compute_quantities(self, separation_data, monkeypatch):
         X, y = separation_data
         model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
+
+        called = {"dgepq3": 0, "dorgqr": 0}
+        orig_dgepq3 = firthmodels.logistic.dgeqp3
+        orig_dorgqr = firthmodels.logistic.dorgqr
+
+        def wrapped_dgeqp3(*args, **kwargs):
+            called["dgepq3"] += 1
+            return orig_dgepq3(*args, **kwargs)
+
+        def wrapped_dorgqr(*args, **kwargs):
+            called["dorgqr"] += 1
+            return orig_dorgqr(*args, **kwargs)
 
         def fake_dpotrf(*args, **kwargs):
             raise scipy.linalg.LinAlgError("forced failure")
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
+        monkeypatch.setattr("firthmodels.logistic.dgeqp3", wrapped_dgeqp3)
+        monkeypatch.setattr("firthmodels.logistic.dorgqr", wrapped_dorgqr)
+
         model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
 
+        assert called["dgepq3"] > 0
+        assert called["dorgqr"] > 0
         np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
         np.testing.assert_allclose(
             model_fallback.intercept_, model_normal.intercept_, rtol=1e-6
         )
+
+    def test_qr_fallback_rank_deficient_raises(self, monkeypatch):
+        from firthmodels.logistic import _Workspace
+
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(5)
+        X = np.column_stack([x, x])  # rank deficient
+        y = rng.integers(0, 2, 5)
+        ws = _Workspace(X.shape[0], X.shape[1])
+        beta = np.zeros(X.shape[1])
+        sample_weight = np.ones(X.shape[0])
+        offset = np.zeros(X.shape[0])
+
+        def fake_dpotrf(*args, **kwargs):
+            raise scipy.linalg.LinAlgError("forced failure")
+
+        monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            firthmodels.logistic.compute_logistic_quantities(
+                X, y, beta, sample_weight, offset, workspace=ws
+            )
 
     def test_cholesky_fallback_in_solver(self, separation_data, monkeypatch):
         """Fallback to lstsq in newton_raphson solver produces equivalent results."""

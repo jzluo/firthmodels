@@ -6,7 +6,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
-from scipy.linalg.lapack import dpotrf, dpotrs
+from scipy.linalg.lapack import dgeqp3, dorgqr, dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
@@ -813,14 +813,35 @@ def compute_logistic_quantities(
 
         np.matmul(inv_fisher_info, ws.XtW, out=ws.solved)
 
-    except scipy.linalg.LinAlgError:
-        ws.solved[:] = np.linalg.lstsq(ws.fisher_info, ws.XtW, rcond=None)[0]
-        sign, logdet = np.linalg.slogdet(ws.fisher_info)
-        if sign <= 0:
-            # use -inf so loglik approaches -inf
-            logdet = -np.inf
+        # h_i = solved[:,i] · XtW[:,i]
+        np.einsum("ij,ij->j", ws.solved, ws.XtW, out=ws.h)
 
-    np.einsum("ij,ij->j", ws.solved, ws.XtW, out=ws.h)  # h_i = solved[:,i] · XtW[:,i]
+    except scipy.linalg.LinAlgError:
+        # XtW.T is C-order, explicitly copy to F-order
+        XW = np.asfortranarray(ws.XtW.T)
+
+        # pivoting QR
+        qr, jpvt, tau, _, info = dgeqp3(XW, overwrite_a=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dgeqp3 failed")
+
+        R = np.triu(qr[:k, :k])
+
+        # check rank
+        tol = max(XW.shape) * np.finfo(np.float64).eps * abs(R[0, 0])
+        rank = (np.abs(R.diagonal()) > tol).sum()
+        if rank < k:
+            raise scipy.linalg.LinAlgError("Weighted design matrix is rank deficient")
+
+        Q, _, info = dorgqr(qr, tau, overwrite_a=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dorgqr failed")
+
+        np.log(np.abs(R.diagonal()), out=ws.temp_k)
+        logdet = 2.0 * ws.temp_k.sum()
+
+        # hat diag: h_i = sum_j Q_ij^2
+        np.einsum("ij, ij->i", Q, Q, out=ws.h)
 
     # augmented fisher information
     # w_aug = (sample_weight + h) * p * (1 - p)
