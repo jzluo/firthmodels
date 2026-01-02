@@ -6,7 +6,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
-from scipy.linalg.lapack import dpotrf, dpotrs
+from scipy.linalg.lapack import dgeqp3, dorgqr, dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
@@ -24,7 +24,9 @@ from firthmodels import NUMBA_AVAILABLE
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         _STATUS_CONVERGED,
+        _STATUS_LINALG_FAIL,
         _STATUS_MAX_ITER,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         constrained_lrt_1df_logistic,
         newton_raphson_logistic,
@@ -199,6 +201,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 sample_weight, X, dtype=np.float64, ensure_non_negative=True
             ),
         )
+        if not np.any(sample_weight[y == 0] > 0) or not np.any(
+            sample_weight[y == 1] > 0
+        ):
+            raise ValueError("Need at least one positive-weight sample in each class.")
+
         if offset is None:
             offset = np.zeros(X.shape[0], dtype=np.float64)
         else:
@@ -218,6 +225,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             X = np.column_stack([X, np.ones(X.shape[0])])
 
         n_features = X.shape[1]
+
+        # early rank check
+        n_eff = np.count_nonzero(sample_weight > 0)
+        if n_features > n_eff:
+            raise ValueError(
+                f"Number of parameters ({n_features}) exceeds the effective sample size "
+                f"({n_eff})."
+            )
 
         # === run solver ===
         # pre-allocate workspace arrays to reduce allocations
@@ -248,6 +263,15 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=2,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design matrix is rank deficient."
+                )
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "Weighted design QR factorization failed."
+                )
+
             result = FirthResult(
                 beta=beta,
                 loglik=loglik,
@@ -417,6 +441,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=3,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError(
+                    f"Weighted design matrix is rank deficient during LRT for parameter {idx}."
+                )
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    f"Weighted design QR factorization failed during LRT for parameter {idx}."
+                )
             chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
             pvalue = scipy.stats.chi2.sf(chi2, df=1)
             #  back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
@@ -554,7 +586,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     if not computed[idx, bound_idx]:
                         which = cast(Literal[-1, 1], which)  # mypy -_-
                         if self._resolve_backend() == "numba":
-                            bound, converged, iterations = profile_ci_bound_logistic(
+                            bound, status, iterations = profile_ci_bound_logistic(
                                 X=X,
                                 y=y,
                                 sample_weight=sample_weight,
@@ -569,9 +601,21 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                                 D0=D0,
                                 workspace=self._workspace.numba_buffers(),
                             )
+                            if status == _STATUS_RANK_DEFICIENT:
+                                raise scipy.linalg.LinAlgError(
+                                    f"Weighted design matrix is rank deficient during "
+                                    f"{'lower' if which == -1 else 'upper'} bound CI "
+                                    f"for parameter {idx}."
+                                )
+                            elif status == _STATUS_LINALG_FAIL:
+                                raise scipy.linalg.LinAlgError(
+                                    f"Weighted design QR factorization failed during "
+                                    f"{'lower' if which == -1 else 'upper'} bound CI "
+                                    f"for parameter {idx}."
+                                )
                             result = ProfileCIBoundResult(
                                 bound=bound,
-                                converged=converged,
+                                converged=(status == _STATUS_CONVERGED),
                                 n_iter=iterations,
                             )
 
@@ -774,143 +818,103 @@ def compute_logistic_quantities(
     beta: NDArray[np.float64],
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
-    workspace: _Workspace | None = None,
+    workspace: _Workspace,
 ) -> LogisticQuantities:
     """Compute all quantities needed for one Newton-Raphson iteration."""
     n, k = X.shape
 
-    if workspace is not None:
-        # eta = X @ beta + offset
-        # p = expit(eta)
-        ws = workspace
-        np.dot(X, beta, out=ws.eta)
-        np.add(ws.eta, offset, out=ws.eta)
-        expit(ws.eta, out=ws.p)
+    # eta = X @ beta + offset
+    # p = expit(eta)
+    ws = workspace
+    np.dot(X, beta, out=ws.eta)
+    np.add(ws.eta, offset, out=ws.eta)
+    expit(ws.eta, out=ws.p)
 
-        # w = sample_weight * p * (1 - p)
-        np.subtract(1.0, ws.p, out=ws.w)
-        np.multiply(ws.p, ws.w, out=ws.w)
-        np.multiply(sample_weight, ws.w, out=ws.w)
+    # w = sample_weight * p * (1 - p)
+    np.subtract(1.0, ws.p, out=ws.w)
+    np.multiply(ws.p, ws.w, out=ws.w)
+    np.multiply(sample_weight, ws.w, out=ws.w)
 
-        # # Fisher information: X'WX
-        # sqrt_w = np.sqrt(w)
-        # XtW = X.T * sqrt_w  # (k, n) broadcast so we don't materialize (n, n) diag matrix
-        # fisher_info = XtW @ XtW.T
-        np.sqrt(ws.w, out=ws.sqrt_w)
-        np.multiply(X.T, ws.sqrt_w, out=ws.XtW)
-        np.matmul(ws.XtW, ws.XtW.T, out=ws.fisher_info)
+    # # Fisher information: X'WX
+    # sqrt_w = np.sqrt(w)
+    # XtW = X.T * sqrt_w  # (k, n) broadcast so we don't materialize (n, n) diag matrix
+    # fisher_info = XtW @ XtW.T
+    np.sqrt(ws.w, out=ws.sqrt_w)
+    np.multiply(X.T, ws.sqrt_w, out=ws.XtW)
+    np.matmul(ws.XtW, ws.XtW.T, out=ws.fisher_info)
 
-        try:
-            L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
-            if info != 0:
-                raise scipy.linalg.LinAlgError("dpotrf failed")
+    try:
+        L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrf failed")
 
-            np.log(L.diagonal(), out=ws.temp_k)
-            logdet = 2.0 * ws.temp_k.sum()
+        np.log(L.diagonal(), out=ws.temp_k)
+        logdet = 2.0 * ws.temp_k.sum()
 
-            inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
-            if info != 0:
-                raise scipy.linalg.LinAlgError("dpotrs failed")
+        inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dpotrs failed")
 
-            np.matmul(inv_fisher_info, ws.XtW, out=ws.solved)
+        np.matmul(inv_fisher_info, ws.XtW, out=ws.solved)
 
-        except scipy.linalg.LinAlgError:
-            ws.solved[:] = np.linalg.lstsq(ws.fisher_info, ws.XtW, rcond=None)[0]
-            sign, logdet = np.linalg.slogdet(ws.fisher_info)
-            if sign <= 0:
-                # use -inf so loglik approaches -inf
-                logdet = -np.inf
+        # h_i = solved[:,i] · XtW[:,i]
+        np.einsum("ij,ij->j", ws.solved, ws.XtW, out=ws.h)
 
-        np.einsum(
-            "ij,ij->j", ws.solved, ws.XtW, out=ws.h
-        )  # h_i = solved[:,i] · XtW[:,i]
+    except scipy.linalg.LinAlgError:
+        # XtW.T is C-order, explicitly copy to F-order
+        XW = np.asfortranarray(ws.XtW.T)
 
-        # augmented fisher information
-        # w_aug = (sample_weight + h) * p * (1 - p)
-        np.add(sample_weight, ws.h, out=ws.w_aug)
-        np.subtract(1.0, ws.p, out=ws.sqrt_w_aug)  # reuse
-        np.multiply(ws.w_aug, ws.p, out=ws.w_aug)
-        np.multiply(ws.w_aug, ws.sqrt_w_aug, out=ws.w_aug)
+        # pivoting QR
+        qr, jpvt, tau, _, info = dgeqp3(XW, overwrite_a=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dgeqp3 failed")
 
-        np.sqrt(ws.w_aug, out=ws.sqrt_w_aug)
-        np.multiply(X.T, ws.sqrt_w_aug, out=ws.XtW_aug)
-        np.matmul(ws.XtW_aug, ws.XtW_aug.T, out=ws.fisher_info_aug)
+        R = np.triu(qr[:k, :k])
 
-        # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
-        np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
-        np.logaddexp(
-            0, ws.eta, out=ws.sqrt_w_aug
-        )  # reuse, sqrt_w_aug = log(1 + exp(eta))
-        np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
-        loglik = sample_weight @ ws.w + 0.5 * logdet
+        # check rank
+        tol = max(XW.shape) * np.finfo(np.float64).eps * abs(R[0, 0])
+        rank = (np.abs(R.diagonal()) > tol).sum()
+        if rank < k:
+            raise scipy.linalg.LinAlgError("Weighted design matrix is rank deficient")
 
-        # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
-        # residual = sample_weight * (y - p) + h * (0.5 - p)
-        np.subtract(y, ws.p, out=ws.residual)
-        np.multiply(sample_weight, ws.residual, out=ws.residual)
-        np.subtract(0.5, ws.p, out=ws.w)  # reuse, w = 0.5 - p
-        np.multiply(ws.h, ws.w, out=ws.w)
-        np.add(ws.residual, ws.w, out=ws.residual)
-        modified_score = X.T @ ws.residual
+        Q, _, info = dorgqr(qr, tau, overwrite_a=1)
+        if info != 0:
+            raise scipy.linalg.LinAlgError("dorgqr failed")
 
-    else:
-        eta = X @ beta + offset
-        p = expit(eta)
+        np.log(np.abs(R.diagonal()), out=ws.temp_k)
+        logdet = 2.0 * ws.temp_k.sum()
 
-        # W = diag(weights * p * (1-p))
-        w = sample_weight * p * (1 - p)
+        # hat diag: h_i = sum_j Q_ij^2
+        np.einsum("ij, ij->i", Q, Q, out=ws.h)
 
-        # Fisher information: X'WX
-        sqrt_w = np.sqrt(w)
-        XtW = (
-            X.T * sqrt_w
-        )  # (k, n) broadcast so we don't materialize (n, n) diag matrix
-        fisher_info = XtW @ XtW.T
+    # augmented fisher information
+    # w_aug = (sample_weight + h) * p * (1 - p)
+    np.add(sample_weight, ws.h, out=ws.w_aug)
+    np.subtract(1.0, ws.p, out=ws.sqrt_w_aug)  # reuse
+    np.multiply(ws.w_aug, ws.p, out=ws.w_aug)
+    np.multiply(ws.w_aug, ws.sqrt_w_aug, out=ws.w_aug)
 
-        # hat diagonal: h_i = v_i' Fisher^{-1} v_i where v_i = sqrt(w_i) * x_i
-        try:
-            k = fisher_info.shape[0]
+    np.sqrt(ws.w_aug, out=ws.sqrt_w_aug)
+    np.multiply(X.T, ws.sqrt_w_aug, out=ws.XtW_aug)
+    np.matmul(ws.XtW_aug, ws.XtW_aug.T, out=ws.fisher_info_aug)
 
-            L, info = dpotrf(fisher_info, lower=1, overwrite_a=0)
-            if info != 0:
-                raise scipy.linalg.LinAlgError("dpotrf failed")
-            logdet = 2.0 * np.log(L.diagonal()).sum()
+    # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
+    np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
+    np.logaddexp(0, ws.eta, out=ws.sqrt_w_aug)  # reuse, sqrt_w_aug = log(1 + exp(eta))
+    np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
+    loglik = sample_weight @ ws.w + 0.5 * logdet
 
-            inv_fisher_info, info = dpotrs(
-                L, np.eye(k, dtype=np.float64, order="F"), lower=1
-            )
-            if info != 0:
-                raise scipy.linalg.LinAlgError("dpotrs failed")
-
-            solved = inv_fisher_info @ XtW
-        except (
-            scipy.linalg.LinAlgError
-        ):  # fisher info not positive definite - fall back to pinv
-            solved, *_ = np.linalg.lstsq(fisher_info, XtW, rcond=None)
-            sign, logdet = np.linalg.slogdet(fisher_info)
-            if sign <= 0:
-                # use -inf so loglik approaches -inf
-                logdet = -np.inf
-
-        h = np.einsum("ij,ij->j", solved, XtW)  # h_i = solved[:,i] · XtW[:,i]
-
-        # augmented fisher information
-        w_aug = (sample_weight + h) * p * (1 - p)
-        sqrt_w_aug = np.sqrt(w_aug)
-        XtW_aug = X.T * sqrt_w_aug
-        fisher_info_aug = XtW_aug @ XtW_aug.T
-
-        # L*(β) = Σ weight_i * [y_i*log(p_i) + (1-y_i)*log(1-p_i)] + 0.5*log|I(β)|
-        # y*log(p) + (1-y)*log(1-p) = y*eta - log(1+exp(eta))
-        # avoids log(0) when p>-0 or p->1
-        loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
-
-        # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
-        residual = sample_weight * (y - p) + h * (0.5 - p)
-        modified_score = X.T @ residual
+    # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
+    # residual = sample_weight * (y - p) + h * (0.5 - p)
+    np.subtract(y, ws.p, out=ws.residual)
+    np.multiply(sample_weight, ws.residual, out=ws.residual)
+    np.subtract(0.5, ws.p, out=ws.w)  # reuse, w = 0.5 - p
+    np.multiply(ws.h, ws.w, out=ws.w)
+    np.add(ws.residual, ws.w, out=ws.residual)
+    modified_score = X.T @ ws.residual
 
     return LogisticQuantities(
         loglik=loglik,
         modified_score=modified_score,
-        fisher_info=ws.fisher_info_aug if workspace else fisher_info_aug,
+        fisher_info=ws.fisher_info_aug,
     )

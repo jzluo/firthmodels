@@ -14,8 +14,10 @@ from firthmodels._numba.linalg import (
     _alloc_f_order,
     dgemm,
     dgemv,
+    dgeqp3,
     dgetrf,
     dgetrs,
+    dorgqr,
     dpotrf,
     dpotri,
     dpotrs,
@@ -27,6 +29,8 @@ from firthmodels._numba.linalg import (
 _STATUS_CONVERGED = 0
 _STATUS_STEP_HALVING_FAILED = 1
 _STATUS_MAX_ITER = 2
+_STATUS_LINALG_FAIL = 3
+_STATUS_RANK_DEFICIENT = 4
 
 
 @njit(fastmath=True, cache=True)
@@ -66,7 +70,7 @@ def compute_logistic_quantities(
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> float:
+) -> tuple[float, int]:  # loglik, status
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     (
         eta,
@@ -85,8 +89,7 @@ def compute_logistic_quantities(
         modified_score,
     ) = workspace
 
-    n = X.shape[0]
-    k = X.shape[1]
+    n, k = X.shape
 
     # eta = X @ beta + offset
     # p = expit(eta)
@@ -127,21 +130,61 @@ def compute_logistic_quantities(
             symmetrize_lower(fisher_info)
             dgemm(fisher_info, XtW, solved)
 
-    if info != 0:
-        # dpotrf or dpotri failed; recompute fisher_info and use lstsq
+            # h = np.einsum("ij,ij->j", solved, XtW)
+            for i in range(n):
+                total = 0.0
+                for j in range(k):
+                    total += solved[j, i] * XtW[j, i]
+                h[i] = total
+
+    if info != 0:  # dpotrf or dpotri failed; fall back to QRCP
         dsyrk(XtW, fisher_info)
         symmetrize_lower(fisher_info)
-        sign, logdet = np.linalg.slogdet(fisher_info)
-        if sign <= 0:
-            logdet = -np.inf
-        solved[:, :] = np.linalg.lstsq(fisher_info, XtW)[0]
 
-    # h = np.einsum("ij,ij->j", solved, XtW)
-    for i in range(n):
-        total = 0.0
+        XW = _alloc_f_order(n, k)
+        jpvt = np.zeros(k, dtype=BLAS_INT_DTYPE)
+        tau = np.empty(k, dtype=np.float64)
+        work = np.empty(
+            max(3 * (k + 1), 1), dtype=np.float64
+        )  # scipy default for dgeqp3
+
+        # copy XtW.T to XW (F-contiguous) for dgeqp3
         for j in range(k):
-            total += solved[j, i] * XtW[j, i]
-        h[i] = total
+            for i in range(n):
+                XW[i, j] = XtW[j, i]
+
+        info = dgeqp3(XW, jpvt, tau, work)
+        if info != 0:
+            return -np.inf, _STATUS_LINALG_FAIL
+
+        # check rank via R diagonal
+        R_diag_max = abs(XW[0, 0])
+        tol = max(n, k) * np.finfo(np.float64).eps * R_diag_max
+        rank = 0
+        for j in range(k):
+            if abs(XW[j, j]) > tol:
+                rank += 1
+
+        if rank < k:
+            return -np.inf, _STATUS_RANK_DEFICIENT
+
+        # logdet from R diagonal
+        logdet = 0.0
+        for j in range(k):
+            logdet += np.log(abs(XW[j, j]))
+        logdet *= 2.0
+
+        # Get Q (overwrites XW)
+        info = dorgqr(XW, tau, work, k)
+        if info != 0:
+            return -np.inf, _STATUS_LINALG_FAIL
+
+        # h_i = sum_j Q_ij^2
+        for i in range(n):
+            total = 0.0
+            for j in range(k):
+                total += XW[i, j] * XW[i, j]
+            h[i] = total
 
     for i in range(n):
         w_aug_i = (sample_weight[i] + h[i]) * p[i] * (1.0 - p[i])
@@ -166,7 +209,7 @@ def compute_logistic_quantities(
 
     dgemv(X.T, residual, modified_score)
 
-    return loglik
+    return loglik, 0  # status 0 meaning success
 
 
 @njit(fastmath=True, cache=True)
@@ -211,7 +254,11 @@ def newton_raphson_logistic(
     score_col = _alloc_f_order(k, 1)
     delta = np.zeros(k, dtype=np.float64)
 
-    loglik = compute_logistic_quantities(X, y, beta, sample_weight, offset, workspace)
+    loglik, status = compute_logistic_quantities(
+        X, y, beta, sample_weight, offset, workspace
+    )
+    if status != 0:
+        return beta, loglik, fisher_info_aug, 0, status
 
     for iteration in range(1, max_iter + 1):
         fisher_info[:, :] = fisher_info_aug
@@ -245,9 +292,11 @@ def newton_raphson_logistic(
         for i in range(k):
             beta_new[i] = beta[i] + delta[i]
 
-        loglik_new = compute_logistic_quantities(
+        loglik_new, status = compute_logistic_quantities(
             X, y, beta_new, sample_weight, offset, workspace
         )
+        if status != 0:
+            return beta, loglik, fisher_info_aug, iteration, status
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -261,9 +310,11 @@ def newton_raphson_logistic(
                 for i in range(k):
                     beta_new[i] = beta[i] + step_factor * delta[i]
 
-                loglik_new = compute_logistic_quantities(
+                loglik_new, status = compute_logistic_quantities(
                     X, y, beta_new, sample_weight, offset, workspace
                 )
+                if status != 0:
+                    return beta, loglik, fisher_info_aug, iteration, status
 
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -337,7 +388,11 @@ def constrained_lrt_1df_logistic(
             free_idx[pos] = j
             pos += 1
 
-    loglik = compute_logistic_quantities(X, y, beta, sample_weight, offset, workspace)
+    loglik, status = compute_logistic_quantities(
+        X, y, beta, sample_weight, offset, workspace
+    )
+    if status != 0:
+        return loglik, 0, status
 
     for iteration in range(1, max_iter + 1):
         for i in range(free_k):
@@ -383,9 +438,11 @@ def constrained_lrt_1df_logistic(
             beta_new[free_idx[i]] = beta[free_idx[i]] + delta[i]
         beta_new[idx] = 0.0
 
-        loglik_new = compute_logistic_quantities(
+        loglik_new, status = compute_logistic_quantities(
             X, y, beta_new, sample_weight, offset, workspace
         )
+        if status != 0:
+            return loglik, iteration, status
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -400,9 +457,11 @@ def constrained_lrt_1df_logistic(
                     beta_new[free_idx[i]] = beta[free_idx[i]] + step_factor * delta[i]
                 beta_new[idx] = 0.0
 
-                loglik_new = compute_logistic_quantities(
+                loglik_new, status = compute_logistic_quantities(
                     X, y, beta_new, sample_weight, offset, workspace
                 )
+                if status != 0:
+                    return loglik, iteration, status
 
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -433,7 +492,7 @@ def profile_ci_bound_logistic(
     tol: float,
     D0: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
-) -> tuple[float, bool, int]:  # bound, converged, iter
+) -> tuple[float, int, int]:  # bound, status, iter
     """Compute one profile likelihood CI bound using Venzon-Moolgavkar algorithm."""
     (
         eta,
@@ -515,9 +574,11 @@ def profile_ci_bound_logistic(
     # Appendix steps 4-9: Modified Newton-Raphson
     for iteration in range(1, max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
-        loglik = compute_logistic_quantities(
+        loglik, status = compute_logistic_quantities(
             X, y, theta, sample_weight, offset, workspace
         )
+        if status != 0:
+            return theta[idx], status, iteration
 
         # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
         for i in range(k):
@@ -529,7 +590,7 @@ def profile_ci_bound_logistic(
         # between iterations. We're checking |loglik-l_star| directly, and the
         # |scores| of the nuisance parameters.
         if max_abs(F) <= tol:
-            return theta[idx], True, iteration
+            return theta[idx], _STATUS_CONVERGED, iteration
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         for i in range(k):
@@ -641,4 +702,4 @@ def profile_ci_bound_logistic(
             for i in range(k):
                 theta[i] -= 0.1 * v[i]
 
-    return theta[idx], False, max_iter
+    return theta[idx], _STATUS_MAX_ITER, max_iter
