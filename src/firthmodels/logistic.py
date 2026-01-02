@@ -435,11 +435,11 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 )
             elif status == _STATUS_RANK_DEFICIENT:
                 raise scipy.linalg.LinAlgError(
-                    "Weighted design matrix is rank deficient."
+                    f"Weighted design matrix is rank deficient during LRT for parameter {idx}."
                 )
             elif status == _STATUS_LINALG_FAIL:
                 raise scipy.linalg.LinAlgError(
-                    "Weighted design QR factorization failed."
+                    f"Weighted design QR factorization failed during LRT for parameter {idx}."
                 )
             chi2 = max(0.0, 2 * (self.loglik_ - loglik_constrained))
             pvalue = scipy.stats.chi2.sf(chi2, df=1)
@@ -593,6 +593,18 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                                 D0=D0,
                                 workspace=self._workspace.numba_buffers(),
                             )
+                            if status == _STATUS_RANK_DEFICIENT:
+                                raise scipy.linalg.LinAlgError(
+                                    f"Weighted design matrix is rank deficient during "
+                                    f"{'lower' if which == -1 else 'upper'} bound CI "
+                                    f"for parameter {idx}."
+                                )
+                            elif status == _STATUS_LINALG_FAIL:
+                                raise scipy.linalg.LinAlgError(
+                                    f"Weighted design QR factorization failed during "
+                                    f"{'lower' if which == -1 else 'upper'} bound CI "
+                                    f"for parameter {idx}."
+                                )
                             result = ProfileCIBoundResult(
                                 bound=bound,
                                 converged=(status == _STATUS_CONVERGED),
