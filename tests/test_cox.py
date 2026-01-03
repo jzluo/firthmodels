@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
+import scipy.linalg
 
+import firthmodels.cox
 from firthmodels.cox import (
     FirthCoxPH,
     _concordance_index,
@@ -163,6 +165,47 @@ class TestFirthCoxPH:
         )
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
+
+    def test_dpstrf_fallback_in_compute_cox_quantities(
+        self, cox_separation_data, monkeypatch
+    ):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+
+        model_normal = FirthCoxPH(backend="numpy").fit(X, y)
+
+        called = {"dpstrf": 0}
+        orig_dpstrf = firthmodels.cox.dpstrf
+
+        def wrapped_dpstrf(*args, **kwargs):
+            called["dpstrf"] += 1
+            return orig_dpstrf(*args, **kwargs)
+
+        def fake_dpotrf(*args, **kwargs):
+            raise scipy.linalg.LinAlgError("force failure")
+
+        monkeypatch.setattr("firthmodels.cox.dpotrf", fake_dpotrf)
+        monkeypatch.setattr("firthmodels.cox.dpstrf", wrapped_dpstrf)
+
+        model_fallback = FirthCoxPH(backend="numpy").fit(X, y)
+        assert called["dpstrf"] > 0
+        np.testing.assert_allclose(model_fallback.coef_, model_normal.coef_, rtol=1e-6)
+
+    def test_rank_deficient_raises(self, monkeypatch):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(8)
+        X = np.column_stack([x, x])  # rank deficient
+        time = rng.uniform(1, 10, 8)
+        event = rng.choice([True, False], size=8)
+        y = _structured_y(event, time)
+
+        def fake_dpotrf(*args, **kwargs):
+            raise scipy.linalg.LinAlgError("force failure")
+
+        monkeypatch.setattr("firthmodels.cox.dpotrf", fake_dpotrf)
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            FirthCoxPH(backend="numpy").fit(X, y)
 
 
 class TestConcordanceIndex:
