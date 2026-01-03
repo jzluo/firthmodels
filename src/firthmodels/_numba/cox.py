@@ -19,6 +19,7 @@ from firthmodels._numba.linalg import (
     dpotrf,
     dpotri,
     dpotrs,
+    dpstrf,
     dsyrk,
     symmetrize_lower,
 )
@@ -27,6 +28,8 @@ from firthmodels._numba.linalg import (
 _STATUS_CONVERGED = 0
 _STATUS_STEP_HALVING_FAILED = 1
 _STATUS_MAX_ITER = 2
+_STATUS_LINALG_FAIL = 3
+_STATUS_RANK_DEFICIENT = 4
 
 
 @njit(cache=True)
@@ -335,7 +338,7 @@ def compute_cox_quantities(
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],
-):
+) -> tuple[float, int]:
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     n, k = X.shape
     (
@@ -388,15 +391,40 @@ def compute_cox_quantities(
         if info == 0:
             symmetrize_lower(fisher_work)
     if info != 0:  # dpotrf or dpotri failed
-        sign, logdet = np.linalg.slogdet(fisher_info)
-        if sign <= 0:
-            logdet = -np.inf
-        for i in range(k):
+        fisher_work[:, :] = fisher_info
+
+        diag_max = 0.0
+        for j in range(k):
+            diag_val = abs(fisher_work[j, j])
+            if diag_val > diag_max:
+                diag_max = diag_val
+        tol = max(1, k) * np.finfo(np.float64).eps * diag_max
+
+        piv = np.zeros(k, dtype=BLAS_INT_DTYPE)
+        rank, info = dpstrf(fisher_work, piv, tol)
+        if info == 0 and rank == k:
+            logdet = 0.0
             for j in range(k):
-                fisher_work[i, j] = 0.0
-            fisher_work[i, i] = 1.0
-        fisher_work[:, :] = np.linalg.lstsq(fisher_info, fisher_work)[0]
-        # fisher_work now holds inv(fisher_info)
+                logdet += np.log(abs(fisher_work[j, j]))
+            logdet *= 2.0
+
+            info = dpotri(fisher_work)
+            if info == 0:
+                symmetrize_lower(fisher_work)
+                # undo the pivoting
+                temp = _alloc_f_order(k, k)
+                temp[:, :] = fisher_work
+                for i in range(k):
+                    pi = piv[i] - 1  # piv is 1-indexed
+                    for j in range(k):
+                        pj = piv[j] - 1
+                        fisher_work[pi, pj] = temp[i, j]
+            else:
+                return -np.inf, _STATUS_LINALG_FAIL
+        elif rank < k:
+            return -np.inf, _STATUS_RANK_DEFICIENT
+        else:
+            return -np.inf, _STATUS_LINALG_FAIL
 
     _compute_firth_correction(
         X=X,
@@ -413,7 +441,7 @@ def compute_cox_quantities(
 
     loglik += 0.5 * logdet
 
-    return loglik
+    return loglik, 0  # status success
 
 
 @njit(cache=True)
@@ -432,7 +460,7 @@ def newton_raphson_cox(
     """
     JIT-compiled Newton-Raphson solver for Firth Cox proportional hazards.
 
-    Returns (beta, loglik, fisher_info, max_iter, status)
+    Returns (beta, loglik, fisher_info, n_iter, status)
     """
     (
         wX,
@@ -461,7 +489,7 @@ def newton_raphson_cox(
     delta = np.empty(k, dtype=np.float64)
     beta_new = np.empty(k, dtype=np.float64)
 
-    loglik = compute_cox_quantities(
+    loglik, status = compute_cox_quantities(
         X=X,
         block_ends=block_ends,
         block_d=block_d,
@@ -475,6 +503,8 @@ def newton_raphson_cox(
         term23=term23,
         workspace=workspace,
     )
+    if status != 0:
+        return beta, loglik, fisher_info, 0, status
 
     for iteration in range(1, max_iter + 1):
         fisher_work[:] = fisher_info
@@ -503,7 +533,7 @@ def newton_raphson_cox(
         for i in range(k):
             beta_new[i] = beta[i] + delta[i]
 
-        loglik_new = compute_cox_quantities(
+        loglik_new, status = compute_cox_quantities(
             X=X,
             block_ends=block_ends,
             block_d=block_d,
@@ -517,6 +547,8 @@ def newton_raphson_cox(
             term23=term23,
             workspace=workspace,
         )
+        if status != 0:
+            return beta, loglik, fisher_info, 0, status
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -528,7 +560,7 @@ def newton_raphson_cox(
             for _ in range(max_halfstep):
                 for i in range(k):
                     beta_new[i] = beta[i] + step_factor * delta[i]
-                loglik_new = compute_cox_quantities(
+                loglik_new, status = compute_cox_quantities(
                     X=X,
                     block_ends=block_ends,
                     block_d=block_d,
@@ -542,6 +574,9 @@ def newton_raphson_cox(
                     term23=term23,
                     workspace=workspace,
                 )
+                if status != 0:
+                    return beta, loglik, fisher_info, 0, status
+
                 if loglik_new >= loglik:
                     for i in range(k):
                         beta[i] = beta_new[i]
@@ -552,7 +587,7 @@ def newton_raphson_cox(
 
             if not accepted:
                 # recompute quantities at the last accepted beta
-                compute_cox_quantities(
+                loglik, status = compute_cox_quantities(
                     X=X,
                     block_ends=block_ends,
                     block_d=block_d,
@@ -628,7 +663,7 @@ def constrained_lrt_1df_cox(
     delta = np.empty(free_k, dtype=np.float64)
     beta_new = np.empty(k, dtype=np.float64)
 
-    loglik = compute_cox_quantities(
+    loglik, status = compute_cox_quantities(
         X=X,
         block_ends=block_ends,
         block_d=block_d,
@@ -642,6 +677,8 @@ def constrained_lrt_1df_cox(
         term23=term23,
         workspace=workspace,
     )
+    if status != 0:
+        return loglik, 0, status
 
     for iteration in range(1, max_iter + 1):
         for i in range(free_k):
@@ -685,7 +722,7 @@ def constrained_lrt_1df_cox(
             beta_new[free_idx[i]] = beta[free_idx[i]] + delta[i]
         beta_new[idx] = 0.0
 
-        loglik_new = compute_cox_quantities(
+        loglik_new, status = compute_cox_quantities(
             X=X,
             block_ends=block_ends,
             block_d=block_d,
@@ -699,6 +736,8 @@ def constrained_lrt_1df_cox(
             term23=term23,
             workspace=workspace,
         )
+        if status != 0:
+            return loglik, iteration, status
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -712,7 +751,7 @@ def constrained_lrt_1df_cox(
                     beta_new[free_idx[i]] = beta[free_idx[i]] + step_factor * delta[i]
                 beta_new[idx] = 0.0
 
-                loglik_new = compute_cox_quantities(
+                loglik_new, status = compute_cox_quantities(
                     X=X,
                     block_ends=block_ends,
                     block_d=block_d,
@@ -726,6 +765,8 @@ def constrained_lrt_1df_cox(
                     term23=term23,
                     workspace=workspace,
                 )
+                if status != 0:
+                    return loglik, iteration, status
 
                 if loglik_new >= loglik:
                     for i in range(k):
@@ -844,7 +885,7 @@ def profile_ci_bound_cox(
     # Appendix steps 4-9: Modified Newton-Raphson
     for iteration in range(1, max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
-        loglik = compute_cox_quantities(
+        loglik, status = compute_cox_quantities(
             X=X,
             block_ends=block_ends,
             block_d=block_d,
@@ -858,6 +899,8 @@ def profile_ci_bound_cox(
             term23=term23,
             workspace=workspace,
         )
+        if status != 0:
+            return theta[idx], iteration, status
 
         # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
         for i in range(k):

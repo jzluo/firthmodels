@@ -18,7 +18,9 @@ from firthmodels import NUMBA_AVAILABLE
 if NUMBA_AVAILABLE:
     from firthmodels._numba.cox import (
         _STATUS_CONVERGED,
+        _STATUS_LINALG_FAIL,
         _STATUS_MAX_ITER,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         concordance_index,
         constrained_lrt_1df_cox,
@@ -177,6 +179,12 @@ class FirthCoxPH(BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=2,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError("Fisher information is rank deficient.")
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "dpstrf failed - Fisher information is not PSD."
+                )
 
             result = FirthResult(
                 beta=beta,
@@ -317,6 +325,12 @@ class FirthCoxPH(BaseEstimator):
                     "Maximum number of iterations reached without convergence.",
                     ConvergenceWarning,
                     stacklevel=3,
+                )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError("Fisher information is rank deficient.")
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "dpstrf failed - Fisher information is not PSD."
                 )
 
             chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
