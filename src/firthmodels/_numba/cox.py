@@ -548,7 +548,7 @@ def newton_raphson_cox(
             workspace=workspace,
         )
         if status != 0:
-            return beta, loglik, fisher_info, 0, status
+            return beta, loglik, fisher_info, iteration, status
 
         if loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
@@ -575,7 +575,7 @@ def newton_raphson_cox(
                     workspace=workspace,
                 )
                 if status != 0:
-                    return beta, loglik, fisher_info, 0, status
+                    return beta, loglik, fisher_info, iteration, status
 
                 if loglik_new >= loglik:
                     for i in range(k):
