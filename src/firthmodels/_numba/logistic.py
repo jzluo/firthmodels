@@ -19,9 +19,9 @@ from firthmodels._numba.linalg import (
     dgetrs,
     dorgqr,
     dpotrf,
-    dpotri,
     dpotrs,
     dsyrk,
+    set_identity,
     symmetrize_lower,
 )
 
@@ -79,6 +79,7 @@ def compute_logistic_quantities(
         sqrt_w,
         XtW,
         fisher_info,
+        eye_k,
         solved,
         h,
         w_aug,
@@ -114,10 +115,8 @@ def compute_logistic_quantities(
             XtW[j, i] = X[i, j] * w_i
 
     # fisher_info = XtW @ XtW.T
-    # dpotrf L overwrites fisher_info with lower Cholesky factor
+    # dpotrf overwrites fisher_info with lower Cholesky factor
     # compute logdet using L diagonal (in fisher_info)
-    # dpotri overwrites fisher_info with inv(fisher_info)
-    # then reflect upper triangle
     dsyrk(XtW, fisher_info)
     info = dpotrf(fisher_info)
     if info == 0:
@@ -125,10 +124,11 @@ def compute_logistic_quantities(
         for i in range(k):
             logdet += np.log(fisher_info[i, i])
         logdet *= 2.0
-        info = dpotri(fisher_info)
+
+        set_identity(eye_k)
+        info = dpotrs(fisher_info, eye_k)  # eye_k now contains inv(fisher_info)
         if info == 0:
-            symmetrize_lower(fisher_info)
-            dgemm(fisher_info, XtW, solved)
+            dgemm(eye_k, XtW, solved)
 
             # h = np.einsum("ij,ij->j", solved, XtW)
             for i in range(n):
@@ -137,7 +137,7 @@ def compute_logistic_quantities(
                     total += solved[j, i] * XtW[j, i]
                 h[i] = total
 
-    if info != 0:  # dpotrf or dpotri failed; fall back to QRCP
+    if info != 0:  # dpotrf or dpotrs failed; fall back to QRCP
         dsyrk(XtW, fisher_info)
         symmetrize_lower(fisher_info)
 
@@ -236,7 +236,8 @@ def newton_raphson_logistic(
         w,
         sqrt_w,
         XtW,
-        fisher_info,  # use this as a scratch array
+        fisher_info,  # use this as a (k, k) scratch array
+        eye_k,
         solved,
         h,
         w_aug,
@@ -361,7 +362,8 @@ def constrained_lrt_1df_logistic(
         w,
         sqrt_w,
         XtW,
-        fisher_info,  # use this as a scratch array
+        fisher_info,  # use this as a (k, k) scratch array
+        eye_k,
         solved,
         h,
         w_aug,
@@ -500,7 +502,8 @@ def profile_ci_bound_logistic(
         w,
         sqrt_w,
         XtW,
-        fisher_info,  # use this as a scratch array
+        fisher_info,  # use this as a (k, k) scratch array
+        eye_k,
         solved,
         h,
         w_aug,

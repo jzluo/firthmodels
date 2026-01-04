@@ -17,10 +17,10 @@ from firthmodels._numba.linalg import (
     dgetrf,
     dgetrs,
     dpotrf,
-    dpotri,
     dpotrs,
     dpstrf,
     dsyrk,
+    set_identity,
     symmetrize_lower,
 )
 
@@ -232,6 +232,7 @@ def _compute_firth_correction(
         wXh,
         A_cumsum,
         B_cumsum,
+        eye_k,
         eta,
         risk,
         h,
@@ -349,6 +350,7 @@ def compute_cox_quantities(
         wXh,
         A_cumsum,
         B_cumsum,
+        eye_k,
         eta,
         risk,
         h,
@@ -387,10 +389,11 @@ def compute_cox_quantities(
         for i in range(k):
             logdet += np.log(fisher_work[i, i])
         logdet *= 2.0
-        info = dpotri(fisher_work)  # fisher_work now holds inv(fisher_info)
-        if info == 0:
-            symmetrize_lower(fisher_work)
-    if info != 0:  # dpotrf or dpotri failed
+
+        set_identity(eye_k)
+        info = dpotrs(fisher_work, eye_k)  # eye_k now contains inv(fisher_info)
+
+    if info != 0:  # dpotrf or dpotrs failed
         fisher_work[:, :] = fisher_info
 
         diag_max = 0.0
@@ -408,17 +411,17 @@ def compute_cox_quantities(
                 logdet += np.log(abs(fisher_work[j, j]))
             logdet *= 2.0
 
-            info = dpotri(fisher_work)
+            set_identity(eye_k)
+            info = dpotrs(fisher_work, eye_k)  # eye_k now contains inv(fisher_info)
             if info == 0:
-                symmetrize_lower(fisher_work)
                 # undo the pivoting
                 temp = _alloc_f_order(k, k)
-                temp[:, :] = fisher_work
+                temp[:, :] = eye_k
                 for i in range(k):
                     pi = piv[i] - 1  # piv is 1-indexed
                     for j in range(k):
                         pj = piv[j] - 1
-                        fisher_work[pi, pj] = temp[i, j]
+                        eye_k[pi, pj] = temp[i, j]
             else:
                 return -np.inf, _STATUS_LINALG_FAIL
         elif rank < k:
@@ -430,7 +433,7 @@ def compute_cox_quantities(
         X=X,
         block_ends=block_ends,
         block_d=block_d,
-        fisher_inv=fisher_work,
+        fisher_inv=eye_k,
         modified_score=modified_score,
         x_bar=x_bar,
         Ix=Ix,
@@ -470,6 +473,7 @@ def newton_raphson_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eye_k,
         eta,
         risk,
         h,
@@ -633,6 +637,7 @@ def constrained_lrt_1df_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eye_k,
         eta,
         risk,
         h,
@@ -807,6 +812,7 @@ def profile_ci_bound_cox(
         wXh,
         A_cumsum,
         B_cumsum,
+        eye_k,
         eta,
         risk,
         h,

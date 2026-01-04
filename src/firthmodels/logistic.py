@@ -801,6 +801,7 @@ class _Workspace:
             self.sqrt_w,
             self.XtW,
             self.fisher_info,
+            self.eye_k,
             self.solved,
             self.h,
             self.w_aug,

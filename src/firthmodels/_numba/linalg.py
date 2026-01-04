@@ -37,6 +37,15 @@ def symmetrize_lower(A: NDArray[np.float64]) -> None:
             A[i, j] = A[j, i]
 
 
+@njit(inline="always", cache=True)
+def set_identity(A: NDArray[np.float64]) -> None:
+    """Set A to identity matrix in-place."""
+    n = A.shape[0]
+    A[:, :] = 0.0
+    for i in range(n):
+        A[i, i] = 1.0
+
+
 _SYMBOLS = {
     "firth_dsyrk": ("scipy.linalg.cython_blas", "dsyrk"),
     "firth_dgemm": ("scipy.linalg.cython_blas", "dgemm"),
