@@ -900,7 +900,7 @@ def profile_ci_bound_cox(
             workspace=workspace,
         )
         if status != 0:
-            return theta[idx], iteration, status
+            return theta[idx], status, iteration
 
         # Appendix step 5: F = [l - l*, dl/dw]' (eq. 2)
         for i in range(k):
