@@ -842,6 +842,7 @@ class _Workspace:
             self.wXh,
             self.A_cumsum,
             self.B_cumsum,
+            self.eye_k,
             self.eta,
             self.risk,
             self.h,
