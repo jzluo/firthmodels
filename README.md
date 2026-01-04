@@ -29,15 +29,41 @@ In Cox proportional hazards, an analogous failure mode is monotone likelihood, w
 partial likelihood becomes unbounded (often due to small samples, rare events, or
 near-perfect risk separation).
 
-Firth's method adds a penalty term that:
-- Produces **finite, well-defined estimates** even with separated data
-- **Reduces small-sample bias** in coefficient estimates
-
 These problems are common in:
 - Case-control studies with rare exposures
 - Small clinical trials
 - Genome-wide or Phenome-wide association studies (GWAS/PheWAS)
 - Any dataset where events are rare relative to predictors
+
+Firth's method adds a penalty term that:
+- Produces **finite, well-defined estimates** even with separated data
+- **Reduces small-sample bias** in coefficient estimates
+
+Kosmidis and Firth (2021) formally proved that bias reduction for logistic regression
+models guarantees finite estimates as long as the model matrix has full rank.
+
+### Detecting separation
+You can use `detect_separation` to check if your data has separation before fitting.
+This implements the linear programming method from Konis (2007), as used in the
+R detectseparation package by Kosmidis et al (2022).
+
+The following example is based on the endometrial dataset used in Heinze and Schemper (2002),
+where the `NV` feature causes quasi-complete separation.
+
+```python
+from firthmodels import detect_separation
+
+result = detect_separation(X, y)
+result.separation    # True
+result.is_finite     # array([False,  True,  True,  True])
+result.directions    # array([1, 0, 0, 0])  # where 1 = +Inf, -1 = -Inf, 0 = finite
+print(result.summary())
+# Separation: True
+#   NV         +Inf
+#   PI         finite
+#   EH         finite
+#   intercept  finite
+```
 
 ## Installation
 
@@ -296,13 +322,29 @@ evaluated at `unique_times_`.
 
 Firth D (1993). Bias reduction of maximum likelihood estimates. *Biometrika* 80, 27-38.
 
-Heinze G, Schemper M (2001). A solution to the problem of monotone likelihood in Cox regression. *Biometrics* 57, 114-119.
+Heinze G, Schemper M (2001). A solution to the problem of monotone likelihood in
+Cox regression. *Biometrics* 57, 114-119.
 
-Heinze G, Schemper M (2002). A solution to the problem of separation in logistic regression. *Statistics in Medicine* 21, 2409-2419.
+Heinze G, Schemper M (2002). A solution to the problem of separation in
+logistic regression. *Statistics in Medicine* 21, 2409-2419.
 
-Mbatchou J et al. (2021). Computationally efficient whole-genome regression for quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
+Konis, K. (2007). Linear Programming Algorithms for Detecting Separated
+Data in Binary Logistic Regression Models. DPhil thesis, University of Oxford.
 
-Venzon DJ, Moolgavkar SH (1988). A method for computing profile-likelihood-based confidence intervals. *Applied Statistics* 37, 87-94.
+Kosmidis I, Firth D (2021). Jeffreys-prior penalty, finiteness and shrinkage in
+binomial-response generalized linear models. *Biometrika* 108, 71-82.
+
+Kosmidis I, Schumacher D, Schwendinger F (2022). _detectseparation:
+Detect and Check for Separation and Infinite Maximum Likelihood
+Estimates_. doi:10.32614/CRAN.package.detectseparation
+<https://doi.org/10.32614/CRAN.package.detectseparation>, R package
+version 0.3, <https://CRAN.R-project.org/package=detectseparation>.
+
+Mbatchou J et al. (2021). Computationally efficient whole-genome regression for
+quantitative and binary traits. *Nature Genetics* 53, 1097-1103.
+
+Venzon DJ, Moolgavkar SH (1988). A method for computing profile-likelihood-based
+confidence intervals. *Applied Statistics* 37, 87-94.
 
 ## License
 
