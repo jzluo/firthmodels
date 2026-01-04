@@ -15,7 +15,7 @@ Firth-penalized models in Python:
 Firth penalization reduces small-sample bias and produces finite estimates even when
 standard MLE fails due to (quasi-)complete separation or monotone likelihood.
 
-See [#12](https://github.com/jzluo/firthmodels/issues/12) and [#32](https://github.com/jzluo/firthmodels/issues/32) for benchmarking results.
+See the issue trackers [#12](https://github.com/jzluo/firthmodels/issues/12) for `FirthLogisticRegression` benchmarking and [#32](https://github.com/jzluo/firthmodels/issues/32) for `FirthCoxPH` benchmarking.
 
 ## Why Firth penalization?
 
@@ -47,7 +47,7 @@ pip install firthmodels
 Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.
 
 Optional dependencies:
-
+- Numba acceleration: `pip install firthmodels[numba]`
 - Formula interface for the statsmodels adapter: `pip install firthmodels[formula]`
 (or simply install [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
 
@@ -93,6 +93,9 @@ S = model.predict_survival_function(X)  # shape: (n_samples, n_event_times)
 `FirthCoxPH` also accepts `y` as a structured array with boolean `event` and float `time`
 fields (scikit-survival style).
 
+Both estimators take a `backend` parameter that can be one of `'auto'` (default), `'numba'`, or `'numpy'`. If `'auto'`, firthmodels auto-detects Numba availability and uses
+it if installed, otherwise numpy/scipy.
+
 ## Estimators
 
 ### scikit-learn compatible API
@@ -111,7 +114,7 @@ scores = cross_val_score(pipe, X, y, cv=5)
 ```
 
 `FirthCoxPH` also follows the sklearn estimator API (`fit`, `predict`, `score`, etc.).
-It additionally features a scikit-survival-like interface:
+It also has a scikit-survival-like interface:
   - methods: `fit(X, y)`, `predict(X)` (linear predictor), `score(X, y)` (C-index),
   `predict_survival_function(X, return_array=True)`,
   `predict_cumulative_hazard_function(X, return_array=True)`.
@@ -158,6 +161,7 @@ model.conf_int(method='pl', features=['snp', 'age'])  # can selectively compute 
 ### Sample weights and offsets
 
 ```python
+# currently for FirthLogisticRegression only
 model.fit(X, y, sample_weight=weights)
 model.fit(X, y, offset=offset)
 ```
@@ -210,6 +214,7 @@ res = FirthLogit.from_formula("y ~ age + treatment", df).fit()
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `backend` | `'auto'` | `'auto'`, `'numba'`, or `'numpy'`. `'auto'` uses numba if available. |
 | `fit_intercept` | `True` | Whether to add an intercept term |
 | `max_iter` | `25` | Maximum Newton-Raphson iterations |
 | `gtol` | `1e-4` | Gradient convergence tolerance (converged when max\|gradient\| < gtol) |
@@ -230,24 +235,43 @@ res = FirthLogit.from_formula("y ~ age + treatment", df).fit()
 | `converged_` | Whether the solver converged |
 | `lrt_pvalues_` | LRT p-values (after calling `lrt()`); includes intercept if `fit_intercept=True` |
 | `lrt_bse_` | Back-corrected SEs (after calling `lrt()`); includes intercept if `fit_intercept=True` |
+| `classes_` | Class labels (shape `(2,)`) |
+| `n_features_in_` | Number of features seen during fit |
+| `feature_names_in_` | Feature names (if X had string column names) |
 
 
 ### `FirthCoxPH` parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `backend` | `'auto'` | `'auto'`, `'numba'`, or `'numpy'`. `'auto'` uses numba if available. |
 | `max_iter` | `50` | Maximum Newton-Raphson iterations |
 | `gtol` | `1e-4` | Gradient convergence tolerance (converged when max\|gradient\| < gtol) |
 | `xtol` | `1e-6` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
 | `max_step` | `5.0` | Maximum step size per coefficient |
 | `max_halfstep` | `5` | Maximum step-halvings per iteration |
 
-Key methods/attributes:
+### `FirthCoxPH` attributes (after fitting)
 
-- `predict(X)` returns the linear predictor `X @ coef_` (log partial hazard).
-- `predict_cumulative_hazard_function(X)` returns an array evaluated at `unique_times_`.
-- `predict_survival_function(X)` returns an array evaluated at `unique_times_`.
-- Baseline functions: `unique_times_`, `cum_baseline_hazard_`, `baseline_survival_`.
+| Attribute | Description |
+|-----------|-------------|
+| `coef_` | Coefficient estimates (log hazard ratios) |
+| `bse_` | Wald standard errors |
+| `pvalues_` | Wald p-values |
+| `loglik_` | Penalized log partial likelihood |
+| `n_iter_` | Number of iterations |
+| `converged_` | Whether the solver converged |
+| `lrt_pvalues_` | LRT p-values (after calling `lrt()`) |
+| `lrt_bse_` | Back-corrected SEs (after calling `lrt()`) |
+| `unique_times_` | Unique event times (ascending order) |
+| `cum_baseline_hazard_` | Breslow cumulative baseline hazard at `unique_times_` |
+| `baseline_survival_` | Baseline survival function at `unique_times_` |
+| `n_features_in_` | Number of features seen during fit |
+| `feature_names_in_` | Feature names (if X had string column names) |
+
+`predict(X)` returns the linear predictor `X @ coef_` (log partial hazard).
+`predict_cumulative_hazard_function(X)` and `predict_survival_function(X)` return arrays
+evaluated at `unique_times_`.
 
 ## References
 

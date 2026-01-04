@@ -1,6 +1,6 @@
 [project]
 name = "firthmodels"
-version = "0.2.2"
+version = "0.3.0"
 description = "Firth-penalized models in Python"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ keywords = [
     "survival analysis",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
