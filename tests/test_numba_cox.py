@@ -1,10 +1,13 @@
 import numpy as np
 import pytest
+import scipy.linalg
 
 from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
     from firthmodels._numba.cox import (
+        _STATUS_LINALG_FAIL,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         concordance_index,
         newton_raphson_cox,
@@ -150,6 +153,18 @@ class TestFirthCoxPH:
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
 
+    def test_numba_rank_deficient_raises(self):
+        """Numba backend detects rank deficiency via dpstrf fallback."""
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(8)
+        X = np.column_stack([x, x])  # rank deficient
+        time = rng.uniform(1, 10, 8)
+        event = rng.choice([True, False], size=8)
+        y = _structured_y(event, time)
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            FirthCoxPH(backend="numba").fit(X, y)
+
 
 class TestNewtonRaphsonCox:
     def test_step_halving_failure_returns_consistent_fisher_info(self):
@@ -190,7 +205,7 @@ class TestNewtonRaphsonCox:
         term1 = np.empty(k, dtype=np.float64)
         term23 = np.empty(k, dtype=np.float64)
 
-        loglik_ref = compute_cox_quantities_numba(
+        loglik_ref, status = compute_cox_quantities_numba(
             X=pre.X,
             block_ends=pre.block_ends,
             block_d=pre.block_d,
@@ -204,7 +219,7 @@ class TestNewtonRaphsonCox:
             term23=term23,
             workspace=ref_workspace.numba_buffers(),
         )
-
+        assert status == 0
         np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)
         np.testing.assert_allclose(ref_workspace.fisher_info, fisher_info, rtol=1e-10)
 

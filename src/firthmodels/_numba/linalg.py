@@ -49,6 +49,7 @@ _SYMBOLS = {
     "firth_dgetrs": ("scipy.linalg.cython_lapack", "dgetrs"),
     "firth_dgeqp3": ("scipy.linalg.cython_lapack", "dgeqp3"),
     "firth_dorgqr": ("scipy.linalg.cython_lapack", "dorgqr"),
+    "firth_dpstrf": ("scipy.linalg.cython_lapack", "dpstrf"),
 }
 
 for symbol, (module, name) in _SYMBOLS.items():
@@ -175,6 +176,16 @@ def _dorgqr_call(typingctx, m, n, k, A, lda, tau, work, lwork, info):
 
     def codegen(context, builder, signature, args):
         return _external_call_codegen("firth_dorgqr", context, builder, signature, args)
+
+    return sig, codegen
+
+
+@intrinsic
+def _dpstrf_call(typingctx, uplo, n, A, lda, piv, rank, tol, work, info):
+    sig = types.void(uplo, n, A, lda, piv, rank, tol, work, info)
+
+    def codegen(context, builder, signature, args):
+        return _external_call_codegen("firth_dpstrf", context, builder, signature, args)
 
     return sig, codegen
 
@@ -351,3 +362,22 @@ def dorgqr(A: np.ndarray, tau: np.ndarray, work: np.ndarray, k: int) -> int:
 
     _dorgqr_call(m_arr, n_arr, k_arr, A, lda, tau, work, lwork, info)
     return int(info[0])
+
+
+@njit(cache=True)
+def dpstrf(A: np.ndarray, piv: np.ndarray, tol: float) -> tuple[int, int]:
+    """Pivoted Cholesky: P.T @ A @ P = L @ L.T. Overwrites A with L.
+
+    Returns (rank, info)
+    """
+    n = A.shape[0]
+    uplo = np.array([ord("L")], dtype=BLAS_FLAG_DTYPE)
+    n_arr = np.array([n], dtype=BLAS_INT_DTYPE)
+    lda = np.array([n], dtype=BLAS_INT_DTYPE)
+    rank_arr = np.array([0], dtype=BLAS_INT_DTYPE)
+    tol_arr = np.array([tol], dtype=np.float64)
+    info = np.array([0], dtype=BLAS_INT_DTYPE)
+    work = np.empty(2 * n, dtype=np.float64)
+
+    _dpstrf_call(uplo, n_arr, A, lda, piv, rank_arr, tol_arr, work, info)
+    return int(rank_arr[0]), int(info[0])

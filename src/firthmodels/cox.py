@@ -8,7 +8,7 @@ from typing import Literal, Self, Sequence, cast
 import numpy as np
 import scipy
 from numpy.typing import ArrayLike, NDArray
-from scipy.linalg.lapack import dpotrf, dpotrs
+from scipy.linalg.lapack import dpotrf, dpotrs, dpstrf
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -18,7 +18,9 @@ from firthmodels import NUMBA_AVAILABLE
 if NUMBA_AVAILABLE:
     from firthmodels._numba.cox import (
         _STATUS_CONVERGED,
+        _STATUS_LINALG_FAIL,
         _STATUS_MAX_ITER,
+        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         concordance_index,
         constrained_lrt_1df_cox,
@@ -177,6 +179,12 @@ class FirthCoxPH(BaseEstimator):
                     ConvergenceWarning,
                     stacklevel=2,
                 )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError("Fisher information is rank deficient.")
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "dpstrf failed - Fisher information is not PSD."
+                )
 
             result = FirthResult(
                 beta=beta,
@@ -317,6 +325,12 @@ class FirthCoxPH(BaseEstimator):
                     "Maximum number of iterations reached without convergence.",
                     ConvergenceWarning,
                     stacklevel=3,
+                )
+            elif status == _STATUS_RANK_DEFICIENT:
+                raise scipy.linalg.LinAlgError("Fisher information is rank deficient.")
+            elif status == _STATUS_LINALG_FAIL:
+                raise scipy.linalg.LinAlgError(
+                    "dpstrf failed - Fisher information is not PSD."
                 )
 
             chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
@@ -919,10 +933,28 @@ def compute_cox_quantities(
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrs failed")
     except scipy.linalg.LinAlgError:
-        sign, logdet = np.linalg.slogdet(ws.fisher_info)
-        if sign <= 0:
-            logdet = -np.inf
-        inv_fisher_info = np.linalg.pinv(ws.fisher_info)
+        # fall back to pivoted Cholesky
+        diag_max = np.abs(ws.fisher_info.diagonal()).max()
+        tol = max(1, k) * np.finfo(np.float64).eps * diag_max
+
+        C, piv, rank, info = dpstrf(ws.fisher_info, tol=tol, lower=1)
+        if info == 0 and rank == k:
+            logdet = 2.0 * np.log(C.diagonal()).sum()
+
+            inv_perm, info = dpotrs(C, ws.eye_k, lower=1)
+            if info != 0:
+                raise scipy.linalg.LinAlgError("dpotrs failed on pivoted Cholesky")
+
+            # undo permutation: inv_fisher_info = P @ inv_perm @ P.T
+            p = piv - 1  # piv is 1-indexed
+            inv_fisher_info = np.empty_like(ws.fisher_info)
+            inv_fisher_info[np.ix_(p, p)] = inv_perm
+        elif rank < k:
+            raise scipy.linalg.LinAlgError("Fisher information is rank deficient")
+        else:
+            raise scipy.linalg.LinAlgError(
+                "dpstrf failed - Fisher information is not PSD"
+            )
 
     # avoid O(n k^3) S3 tensor by swapping the summation order:
     # sum_{r,s} I_inv[r,s] * S3[t,r,s] = sum_i w[i]*X[i,t]*h[i]
