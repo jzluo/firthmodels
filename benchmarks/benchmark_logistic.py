@@ -1067,8 +1067,10 @@ def generate_report(
 
     report = f"""# Firth Logistic Regression Benchmark
 
-Comparison of [firthmodels](https://github.com/jzluo/firthmodels) (Python),
-R brglm2, and R logistf packages for Firth-penalized logistic regression.
+Comparison of [firthmodels](https://github.com/jzluo/firthmodels),
+R [brglm2](https://cran.r-project.org/web/packages/brglm2/index.html),
+and R [logistf](https://cran.r-project.org/web/packages/logistf/index.html)
+packages for Firth-penalized logistic regression.
 
 ## System
 
