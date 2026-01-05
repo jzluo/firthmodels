@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -148,7 +149,9 @@ def warmup_numba() -> None:
     model.conf_int(method="pl")
 
 
-def make_model(backend: str = "numba") -> FirthLogisticRegression:
+def make_model(
+    backend: Literal["auto", "numba", "numpy"] = "numba",
+) -> FirthLogisticRegression:
     """Create FirthLogisticRegression model with benchmark parameters."""
     return FirthLogisticRegression(
         max_iter=MAX_ITER,
@@ -160,7 +163,10 @@ def make_model(backend: str = "numba") -> FirthLogisticRegression:
 
 
 def time_python_fit(
-    X: np.ndarray, y: np.ndarray, n_runs: int = N_RUNS, backend: str = "numba"
+    X: np.ndarray,
+    y: np.ndarray,
+    n_runs: int = N_RUNS,
+    backend: Literal["auto", "numba", "numpy"] = "numba",
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Time firthmodels fit only (no LRT, no profile CI)."""
     times = []
@@ -174,7 +180,10 @@ def time_python_fit(
 
 
 def time_python_full(
-    X: np.ndarray, y: np.ndarray, n_runs: int = N_RUNS, backend: str = "numba"
+    X: np.ndarray,
+    y: np.ndarray,
+    n_runs: int = N_RUNS,
+    backend: Literal["auto", "numba", "numpy"] = "numba",
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray]:
     """Time firthmodels fit + LRT + profile CI."""
     times = []
@@ -354,10 +363,10 @@ def check_agreement(
 # Version and BLAS info
 # -----------------------------------------------------------------------------
 def get_python_version_info() -> dict[str, str]:
-    """Get version info for Python libraries and BLAS backend."""
+    """Get version info for Python libraries, BLAS backend, and system info."""
     import firthmodels
 
-    info = {}
+    info = get_system_info()
 
     # Git commit hash for firthmodels
     try:
@@ -419,6 +428,68 @@ def get_r_version_info() -> dict[str, str]:
         info["brglm2_version"] = "unknown"
         info["r_blas"] = "unknown"
 
+    return info
+
+
+def get_system_info() -> dict[str, str]:
+    """Get OS and CPU info in a cross-platform way."""
+    import platform as plat
+
+    info = {}
+    system = plat.system()
+
+    # OS info
+    if system == "Linux":
+        try:
+            os_release = plat.freedesktop_os_release()
+            info["os"] = os_release.get("PRETTY_NAME", f"Linux {plat.release()}")
+        except OSError:
+            info["os"] = f"Linux {plat.release()}"
+    elif system == "Darwin":
+        mac_ver = plat.mac_ver()[0]
+        info["os"] = f"macOS {mac_ver}"
+    elif system == "Windows":
+        info["os"] = f"Windows {plat.version()}"
+    else:
+        info["os"] = plat.platform()
+
+    # CPU info - platform.processor() often returns unhelpful values
+    cpu = plat.processor()
+    unhelpful = not cpu or cpu in ("arm", "arm64", "x86_64", "i386", "AMD64")
+
+    if unhelpful:
+        try:
+            if system == "Linux":
+                result = subprocess.run(
+                    ["grep", "-m1", "model name", "/proc/cpuinfo"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    cpu = result.stdout.split(":")[1].strip()
+            elif system == "Darwin":
+                result = subprocess.run(
+                    ["sysctl", "-n", "machdep.cpu.brand_string"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    cpu = result.stdout.strip()
+            elif system == "Windows":
+                import winreg
+
+                key = winreg.OpenKey(  # type: ignore[attr-defined]
+                    winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+                    r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                )
+                cpu = winreg.QueryValueEx(key, "ProcessorNameString")[0]  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    if not cpu:
+        cpu = plat.machine()
+
+    info["cpu"] = cpu
     return info
 
 
@@ -646,10 +717,13 @@ def run_benchmarks(
                     _, X, y = data_info[k]
 
                     py_fit_times, py_fit_coef, py_fit_intercept = time_python_fit(
-                        X, y, n_runs, backend
+                        X,
+                        y,
+                        n_runs,
+                        backend,  # type: ignore[arg-type]
                     )
                     py_full_times, py_full_coef, py_full_intercept, py_ci, py_pval = (
-                        time_python_full(X, y, n_runs, backend)
+                        time_python_full(X, y, n_runs, backend)  # type: ignore[arg-type]
                     )
 
                     py_results[backend][k] = {
@@ -984,14 +1058,24 @@ def generate_report(
         brglm2_ver = version_info.get("brglm2_version", "unknown")
         numpy_blas = version_info.get("numpy_blas", "unknown")
         r_blas = version_info.get("r_blas", "unknown")
+        os_info = version_info.get("os", "unknown")
+        cpu_info = version_info.get("cpu", "unknown")
     else:
         firthmodels_ver = ""
         logistf_ver = brglm2_ver = numpy_blas = r_blas = "unknown"
+        os_info = cpu_info = "unknown"
 
     report = f"""# Firth Logistic Regression Benchmark
 
 Comparison of [firthmodels](https://github.com/jzluo/firthmodels) (Python),
 R brglm2, and R logistf packages for Firth-penalized logistic regression.
+
+## System
+
+| | |
+|-----|-----|
+| **OS** | {os_info} |
+| **CPU** | {cpu_info} |
 
 ## Libraries Compared
 
