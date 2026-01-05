@@ -16,8 +16,8 @@ packages for Firth-penalized logistic regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels (numba)** | @ commit 0863ddf | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
-| **firthmodels (numpy)** | @ commit 0863ddf | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels (numba)** | @ commit d233296 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels (numpy)** | @ commit d233296 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **brglm2 (AS-mean)** | 1.0.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 | **brglm2 (MPL_Jeffreys)** | 1.0.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 | **logistf** | 1.26.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
@@ -45,7 +45,7 @@ All implementations agree within chosen tolerance (coefficients 1e-06, CIs 1e-06
 
 Time to fit the model and perform Wald inference. Values are minimum time across runs in milliseconds.
 
-| k | numba | numpy | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
+| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
 |--:|------:|------:|------------:|-------------:|--------:|
 |   5 | 0.5 | 1.3 | 4.3 | 4.3 | 2.1 |
 |  10 | 1.1 | 1.6 | 7.9 | 7.6 | 4.4 |
@@ -62,7 +62,7 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 Time to fit the model, compute penalized likelihood ratio test p-values for all coefficients, and profile likelihood confidence intervals.
 
-| k | numba | numpy | logistf |
+| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
 |--:|------:|------:|--------:|
 |   5 | 5.1 | 11.4 | 13.7 |
 |  10 | 22.9 | 43.1 | 61.6 |
@@ -82,5 +82,5 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 ## Command used to run benchmark
 
 ```bash
-python benchmarks/benchmark_logistic.py --report benchmarks/logistic_report.md --csv benchmarks/logistic_results.csv --n-runs 20
+python benchmarks/benchmark_logistic.py --report benchmarks/logistic_report.md --regenerate-report --saved ./benchmarks/logistic_results.csv
 ```

@@ -1112,7 +1112,7 @@ All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs 
 
 Time to fit the model and perform Wald inference. Values are minimum time across runs in milliseconds.
 
-| k | numba | numpy | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
+| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
 |--:|------:|------:|------------:|-------------:|--------:|
 """
 
@@ -1131,7 +1131,7 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 Time to fit the model, compute penalized likelihood ratio test p-values for all coefficients, and profile likelihood confidence intervals.
 
-| k | numba | numpy | logistf |
+| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
 |--:|------:|------:|--------:|
 """
 
@@ -1235,7 +1235,39 @@ def main():
         metavar="K",
         help="Reduce logistf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 25)",
     )
+    parser.add_argument(
+        "--regenerate-report",
+        action="store_true",
+        help="Regenerate report/plot from --saved CSV without running benchmarks.",
+    )
     args = parser.parse_args()
+
+    # Handle --regenerate-report: skip benchmarks, just regenerate output
+    if args.regenerate_report:
+        if not args.saved:
+            parser.error("--regenerate-report requires --saved")
+        if not args.report and not args.plot:
+            parser.error("--regenerate-report requires --report or --plot")
+
+        df = pd.read_csv(args.saved)
+        version_info = get_python_version_info()
+        version_info.update(get_r_version_info())
+
+        if args.plot:
+            save_plot(df, args.plot, version_info)
+
+        if args.report:
+            report_path = Path(args.report)
+            plot_path = (
+                Path(args.plot) if args.plot else report_path.with_suffix(".png")
+            )
+            if not args.plot:
+                save_plot(df, str(plot_path), version_info)
+            generate_report(
+                df, args.report, plot_path.name, args.n_runs, version_info, sys.argv
+            )
+
+        return
 
     k_values = (
         K_VALUES
