@@ -3,6 +3,7 @@
 [![CI](https://github.com/jzluo/firthmodels/actions/workflows/ci.yml/badge.svg)](https://github.com/jzluo/firthmodels/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/firthmodels)](https://pypi.org/project/firthmodels/)
 ![Pepy Total Downloads](https://img.shields.io/pepy/dt/firthmodels)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/firthmodels)](https://anaconda.org/channels/conda-forge/packages/firthmodels/overview)
 ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fjzluo%2Ffirthmodels%2Frefs%2Fheads%2Fmain%2Fpyproject.toml)
 ![GitHub License](https://img.shields.io/github/license/jzluo/firthmodels)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17863280.svg)](https://doi.org/10.5281/zenodo.17863280)
@@ -40,6 +41,7 @@ These problems are common in:
 
 ## Installation
 
+### Pip
 ```bash
 pip install firthmodels
 ```
@@ -50,6 +52,20 @@ Optional dependencies:
 - Numba acceleration: `pip install firthmodels[numba]`
 - Formula interface for the statsmodels adapter: `pip install firthmodels[formula]`
 (or simply install [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
+
+**Note:**
+Performance is significantly improved when NumPy/SciPy are built against a well-optimized BLAS/LAPACK library. You can check which library yours is using with `np.show_config()`. As a rule of thumb, MKL offers the best performance for Intel CPUs, while OpenBLAS is also a good choice for Intel and generally the best option for AMD. On macOS, ensure NumPy/SciPy are linked to Apple Accelerate.
+
+The most straightforward way to control the BLAS/LAPACK library is to install `firthmodels` in a conda environment:
+
+### conda
+```bash
+conda install -c conda-forge firthmodels  # usually defaults to OpenBLAS
+conda install -c conda-forge firthmodels "libblas=*=*_newaccelerate"  # Apple Accelerate
+conda install -c conda-forge firthmodels "libblas=*=*mkl"  # Intel MKL
+conda install -c conda-forge firthmodels "libblas=*=*openblas"  # OpenBLAS
+```
+Add numba to the conda install command to enable Numba acceleration.
 
 ## Quick start
 
