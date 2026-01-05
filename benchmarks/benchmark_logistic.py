@@ -1081,13 +1081,13 @@ packages for Firth-penalized logistic regression.
 
 ## Libraries Compared
 
-| Library | Language | Version | BLAS |
-|---------|----------|---------|------|
-| **firthmodels (numba)** | Python | {firthmodels_ver} | {numpy_blas} |
-| **firthmodels (numpy)** | Python | {firthmodels_ver} | {numpy_blas} |
-| **brglm2 (AS-mean)** | R | {brglm2_ver} | {r_blas} |
-| **brglm2 (MPL_Jeffreys)** | R | {brglm2_ver} | {r_blas} |
-| **logistf** | R | {logistf_ver} | {r_blas} |
+| Library | Version | BLAS |
+|---------|---------|------|
+| **firthmodels (numba)** | {firthmodels_ver} | {numpy_blas} |
+| **firthmodels (numpy)** | {firthmodels_ver} | {numpy_blas} |
+| **brglm2 (AS-mean)** | {brglm2_ver} | {r_blas} |
+| **brglm2 (MPL_Jeffreys)** | {brglm2_ver} | {r_blas} |
+| **logistf** | {logistf_ver} | {r_blas} |
 
 ## Benchmark Configuration
 
@@ -1102,7 +1102,7 @@ packages for Firth-penalized logistic regression.
 
 brglm2 runs with `check_aliasing=FALSE` since the benchmark data is guaranteed full rank.
 
-All implementations produce numerically equivalent results (verified with tolerances: coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}).
+All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}). Python results are verified against both R packages.
 
 ## Results
 
