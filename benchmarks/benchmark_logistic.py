@@ -201,22 +201,14 @@ def time_python_full(
 # -----------------------------------------------------------------------------
 # R benchmarks
 # -----------------------------------------------------------------------------
-def prepare_data_files(
-    k_values: list[int], tmpdir: Path
-) -> dict[int, tuple[Path, np.ndarray, np.ndarray]]:
-    """Generate and save data files for all k values.
-
-    Returns dict mapping k -> (csv_path, X, y) for verification later.
-    """
-    data_info = {}
+def prepare_data_files(k_values: list[int], tmpdir: Path) -> None:
+    """Generate and save CSV files for R benchmarks."""
     for k in k_values:
         X, y = make_benchmark_data(N_SAMPLES, k, EVENT_RATE, BASE_SEED)
         csv_path = tmpdir / f"data_k{k}.csv"
         df = pd.DataFrame(X, columns=[f"x{i}" for i in range(k)])
         df["y"] = y
         df.to_csv(csv_path, index=False)
-        data_info[k] = (csv_path, X, y)
-    return data_info
 
 
 def run_r_logistf(
@@ -699,9 +691,8 @@ def run_benchmarks(
     with tempfile.TemporaryDirectory() as tmpdir_str:
         tmpdir = Path(tmpdir_str)
 
-        # Generate data files
         print("Generating data files...", file=sys.stderr, flush=True)
-        data_info = prepare_data_files(k_values, tmpdir)
+        prepare_data_files(k_values, tmpdir)
 
         # --- Python benchmarks (both backends) ---
         py_results: dict[str, dict[int, dict]] = {"numba": {}, "numpy": {}}
@@ -714,7 +705,8 @@ def run_benchmarks(
                 )
                 for k in k_values:
                     print(f"  k={k}...", file=sys.stderr, flush=True)
-                    _, X, y = data_info[k]
+
+                    X, y = make_benchmark_data(N_SAMPLES, k, EVENT_RATE, BASE_SEED)
 
                     py_fit_times, py_fit_coef, py_fit_intercept = time_python_fit(
                         X,
@@ -782,7 +774,7 @@ def run_benchmarks(
         assert brglm2_results is not None
 
         for k in k_values:
-            _, X, y = data_info[k]
+            X, y = make_benchmark_data(N_SAMPLES, k, EVENT_RATE, BASE_SEED)
 
             logistf = logistf_results[k]
             brglm2_as = brglm2_results["AS_mean"][k]
@@ -1009,8 +1001,8 @@ def save_plot(
 
     # Fit only (zoomed)
     ax = axes[1, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="numba", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="numpy", linewidth=2)
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
     ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
     ax.plot(
         df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
@@ -1025,8 +1017,12 @@ def save_plot(
 
     # Full workflow (zoomed)
     ax = axes[1, 1]
-    ax.plot(df["k"], df["numba_full_ms"], "o-", label="numba", linewidth=2)
-    ax.plot(df["k"], df["numpy_full_ms"], "x-", label="numpy", linewidth=2)
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
     ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
     ax.set_xlabel("Number of features")
     ax.set_ylabel("Time (ms)")
