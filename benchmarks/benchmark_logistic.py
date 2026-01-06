@@ -356,24 +356,10 @@ def check_agreement(
 # -----------------------------------------------------------------------------
 def get_python_version_info() -> dict[str, str]:
     """Get version info for Python libraries, BLAS backend, and system info."""
-    import firthmodels
+    from importlib.metadata import version
 
     info = get_system_info()
-
-    # Git commit hash for firthmodels
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=Path(firthmodels.__file__).parent.parent.parent,
-        )
-        if result.returncode == 0:
-            info["firthmodels_commit"] = result.stdout.strip()
-        else:
-            info["firthmodels_commit"] = "unknown"
-    except Exception:
-        info["firthmodels_commit"] = "unknown"
+    info["firthmodels_version"] = version("firthmodels")
 
     # NumPy BLAS info from config dict
     try:
@@ -748,7 +734,7 @@ def run_benchmarks(
                     )
                     logistf_results.update(run_r_logistf(k_low, tmpdir, n_runs))
                 if k_high:
-                    logistf_runs = max(3, n_runs // 3)
+                    logistf_runs = n_runs if n_runs <= 3 else max(3, n_runs // 3)
                     print(
                         f"Running R (logistf) benchmarks for k>{logistf_reduce_after} ({logistf_runs} runs)...",
                         file=sys.stderr,
@@ -944,7 +930,7 @@ def save_plot(
 
     # Add version info as suptitle
     if version_info:
-        py_info = f"firthmodels @ {version_info.get('firthmodels_commit', '?')}"
+        py_info = f"firthmodels {version_info.get('firthmodels_version', '?')}"
         py_blas = f"BLAS: {version_info.get('numpy_blas', '?')}"
         r_info = f"logistf {version_info.get('logistf_version', '?')}, brglm2 {version_info.get('brglm2_version', '?')}"
         r_blas = f"BLAS: {version_info.get('r_blas', '?')}"
@@ -954,8 +940,8 @@ def save_plot(
 
     # Fit only (all)
     ax = axes[0, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="numba", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="numpy", linewidth=2)
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
     ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
     ax.plot(
         df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
@@ -969,8 +955,12 @@ def save_plot(
 
     # Full workflow (all)
     ax = axes[0, 1]
-    ax.plot(df["k"], df["numba_full_ms"], "o-", label="numba", linewidth=2)
-    ax.plot(df["k"], df["numpy_full_ms"], "x-", label="numpy", linewidth=2)
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
     ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
     ax.set_xlabel("Number of features")
     ax.set_ylabel("Time (ms)")
@@ -1047,9 +1037,7 @@ def generate_report(
     """Generate a markdown report with benchmark results."""
     # Format version info
     if version_info:
-        firthmodels_ver = (
-            f"@ commit {version_info.get('firthmodels_commit', 'unknown')}"
-        )
+        firthmodels_ver = version_info.get("firthmodels_version", "unknown")
         logistf_ver = version_info.get("logistf_version", "unknown")
         brglm2_ver = version_info.get("brglm2_version", "unknown")
         numpy_blas = version_info.get("numpy_blas", "unknown")
@@ -1098,7 +1086,7 @@ packages for Firth-penalized logistic regression.
 
 brglm2 runs with `check_aliasing=FALSE` since the benchmark data is guaranteed full rank.
 
-All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}). Python results are verified against both R packages.
+All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}).
 
 ## Results
 
