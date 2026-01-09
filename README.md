@@ -16,7 +16,7 @@ Firth-penalized models in Python:
 Firth penalization reduces small-sample bias and produces finite estimates even when
 standard MLE fails due to (quasi-)complete separation or monotone likelihood.
 
-See the issue trackers [#12](https://github.com/jzluo/firthmodels/issues/12) for `FirthLogisticRegression` benchmarking and [#32](https://github.com/jzluo/firthmodels/issues/32) for `FirthCoxPH` benchmarking.
+See [benchmarking results here](https://github.com/jzluo/firthmodels/blob/main/benchmarks/README.md) comparing firthmodels, [logistf](https://cran.r-project.org/web/packages/logistf/index.html), [brglm2](https://cran.r-project.org/web/packages/brglm2/index.html), and [coxphf](https://cran.r-project.org/web/packages/coxphf/index.html).
 
 ## Why Firth penalization?
 
