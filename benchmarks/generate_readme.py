@@ -3,15 +3,14 @@
 
 Usage:
     python benchmarks/generate_readme.py
-
-Reads:
-    benchmarks/logistic_results.csv
-    benchmarks/cox_results.csv
+    python benchmarks/generate_readme.py --logistic-results path/to/logistic.csv
+    python benchmarks/generate_readme.py --cox-results path/to/cox.csv
 
 Outputs:
     benchmarks/README.md
 """
 
+import argparse
 import platform as plat
 import subprocess
 import sys
@@ -623,21 +622,41 @@ python benchmarks/generate_readme.py
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Generate combined benchmarks README.md from CSV results"
+    )
+    parser.add_argument(
+        "--logistic-results",
+        type=str,
+        default=str(BENCHMARKS_DIR / "logistic_results.csv"),
+        help="Path to logistic results CSV (default: benchmarks/logistic_results.csv)",
+    )
+    parser.add_argument(
+        "--cox-results",
+        type=str,
+        default=str(BENCHMARKS_DIR / "cox_results.csv"),
+        help="Path to Cox results CSV (default: benchmarks/cox_results.csv)",
+    )
+    args = parser.parse_args()
+
+    logistic_csv = Path(args.logistic_results)
+    cox_csv = Path(args.cox_results)
+
     # Check that CSV files exist
-    if not LOGISTIC_CSV.exists():
-        print(f"Error: {LOGISTIC_CSV} not found", file=sys.stderr)
-        print("Run benchmark_logistic.py with --csv first", file=sys.stderr)
+    if not logistic_csv.exists():
+        print(f"Error: {logistic_csv} not found", file=sys.stderr)
+        print("Run benchmark_logistic.py with -o first", file=sys.stderr)
         sys.exit(1)
 
-    if not COX_CSV.exists():
-        print(f"Error: {COX_CSV} not found", file=sys.stderr)
-        print("Run benchmark_cox.py with --csv first", file=sys.stderr)
+    if not cox_csv.exists():
+        print(f"Error: {cox_csv} not found", file=sys.stderr)
+        print("Run benchmark_cox.py with -o first", file=sys.stderr)
         sys.exit(1)
 
     # Load data
     print("Loading benchmark results...", file=sys.stderr)
-    logistic_df = pd.read_csv(LOGISTIC_CSV)
-    cox_df = pd.read_csv(COX_CSV)
+    logistic_df = pd.read_csv(logistic_csv)
+    cox_df = pd.read_csv(cox_csv)
 
     # Gather version info
     print("Collecting version info...", file=sys.stderr)
