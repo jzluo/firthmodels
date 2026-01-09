@@ -11,7 +11,6 @@ Requires: R with coxphf, survival, microbenchmark, jsonlite packages installed.
 import argparse
 import json
 import platform as plat
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -698,117 +697,6 @@ def save_plot(
     print(f"Plot saved to {output_path}", file=sys.stderr)
 
 
-def generate_report(
-    df: pd.DataFrame,
-    report_path: str,
-    plot_filename: str,
-    n_runs: int,
-    version_info: dict[str, str] | None = None,
-    command: list[str] | None = None,
-) -> None:
-    """Generate a markdown report with benchmark results."""
-    if version_info:
-        firthmodels_ver = version_info.get("firthmodels_version", "unknown")
-        coxphf_ver = version_info.get("coxphf_version", "unknown")
-        numpy_blas = version_info.get("numpy_blas", "unknown")
-        r_blas = version_info.get("r_blas", "unknown")
-        os_info = version_info.get("os", "unknown")
-        cpu_info = version_info.get("cpu", "unknown")
-    else:
-        firthmodels_ver = ""
-        coxphf_ver = numpy_blas = r_blas = "unknown"
-        os_info = cpu_info = "unknown"
-
-    report = f"""# Firth Cox Proportional Hazards Benchmark
-
-Comparison of [firthmodels](https://github.com/jzluo/firthmodels)
-and [coxphf](https://cran.r-project.org/web/packages/coxphf/index.html)
-for Firth-penalized Cox proportional hazards regression.
-
-## System
-
-| | |
-|-----|-----|
-| **OS** | {os_info} |
-| **CPU** | {cpu_info} |
-
-## Libraries Compared
-
-| Library | Version | BLAS |
-|---------|---------|------|
-| **firthmodels (numba)** | {firthmodels_ver} | {numpy_blas} |
-| **firthmodels (numpy)** | {firthmodels_ver} | {numpy_blas} |
-| **coxphf** | {coxphf_ver} | {r_blas} |
-
-## Benchmark Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Observations (n) | {N_SAMPLES:,} |
-| Event rate | {EVENT_RATE:.0%} |
-| Features (k) | {", ".join(str(k) for k in df["k"].tolist())} |
-| Runs per config | {n_runs} |
-| Solver max_iter | {MAX_ITER} |
-| Solver xtol | {XTOL} |
-| Solver gtol | {GTOL} |
-
-All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}).
-
-## Results
-
-![Benchmark scaling plot]({plot_filename})
-
-### Fit Only
-
-Time to fit the model and perform Wald inference. Values are minimum time across runs in milliseconds.
-
-| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
-|--:|------:|------:|-------:|
-"""
-
-    for _, row in df.iterrows():
-        report += (
-            f"| {int(row['k']):3d} | "
-            f"{row['numba_fit_ms']:.1f} | "
-            f"{row['numpy_fit_ms']:.1f} | "
-            f"{row['coxphf_fit_ms']:.1f} |\n"
-        )
-
-    report += f"""
-### Full Workflow (Fit + LRT + Profile CI)
-
-Time to fit the model, compute penalized likelihood ratio test p-values for all coefficients, and profile likelihood confidence intervals.
-
-| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
-|--:|------:|------:|-------:|
-"""
-
-    for _, row in df.iterrows():
-        report += (
-            f"| {int(row['k']):3d} | "
-            f"{row['numba_full_ms']:.1f} | "
-            f"{row['numpy_full_ms']:.1f} | "
-            f"{row['coxphf_full_ms']:.1f} |\n"
-        )
-
-    report += "\n---\n"
-
-    if command:
-        cmd_str = "python " + " ".join(shlex.quote(arg) for arg in command)
-        report += f"""
-## Command used to run benchmark
-
-```bash
-{cmd_str}
-```
-"""
-
-    with open(report_path, "w") as f:
-        f.write(report)
-
-    print(f"Report saved to {report_path}", file=sys.stderr)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark firthmodels FirthCoxPH vs R coxphf"
@@ -842,12 +730,6 @@ def main():
         type=str,
         default=None,
         help="Save plot to file (e.g., benchmark_cox_scaling.png)",
-    )
-    parser.add_argument(
-        "--report",
-        type=str,
-        default=None,
-        help="Generate markdown report (e.g., benchmark_cox_report.md)",
     )
     parser.add_argument(
         "--coxphf-reduce-after",
@@ -885,17 +767,6 @@ def main():
 
     if args.plot:
         save_plot(df, args.plot, version_info)
-
-    if args.report:
-        report_path = Path(args.report)
-        plot_path = report_path.with_suffix(".png")
-        if not args.plot:
-            save_plot(df, str(plot_path), version_info)
-        else:
-            plot_path = Path(args.plot)
-        generate_report(
-            df, args.report, plot_path.name, args.n_runs, version_info, sys.argv
-        )
 
 
 if __name__ == "__main__":

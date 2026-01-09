@@ -10,7 +10,6 @@ Requires: R with logistf, brglm2, microbenchmark, jsonlite packages installed.
 
 import argparse
 import json
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -1026,130 +1025,6 @@ def save_plot(
     print(f"Plot saved to {output_path}", file=sys.stderr)
 
 
-def generate_report(
-    df: pd.DataFrame,
-    report_path: str,
-    plot_filename: str,
-    n_runs: int,
-    version_info: dict[str, str] | None = None,
-    command: list[str] | None = None,
-) -> None:
-    """Generate a markdown report with benchmark results."""
-    # Format version info
-    if version_info:
-        firthmodels_ver = version_info.get("firthmodels_version", "unknown")
-        logistf_ver = version_info.get("logistf_version", "unknown")
-        brglm2_ver = version_info.get("brglm2_version", "unknown")
-        numpy_blas = version_info.get("numpy_blas", "unknown")
-        r_blas = version_info.get("r_blas", "unknown")
-        os_info = version_info.get("os", "unknown")
-        cpu_info = version_info.get("cpu", "unknown")
-    else:
-        firthmodels_ver = ""
-        logistf_ver = brglm2_ver = numpy_blas = r_blas = "unknown"
-        os_info = cpu_info = "unknown"
-
-    report = f"""# Firth Logistic Regression Benchmark
-
-Comparison of [firthmodels](https://github.com/jzluo/firthmodels),
-R [brglm2](https://cran.r-project.org/web/packages/brglm2/index.html),
-and R [logistf](https://cran.r-project.org/web/packages/logistf/index.html)
-packages for Firth-penalized logistic regression.
-
-## System
-
-| | |
-|-----|-----|
-| **OS** | {os_info} |
-| **CPU** | {cpu_info} |
-
-## Libraries Compared
-
-| Library | Version | BLAS |
-|---------|---------|------|
-| **firthmodels (numba)** | {firthmodels_ver} | {numpy_blas} |
-| **firthmodels (numpy)** | {firthmodels_ver} | {numpy_blas} |
-| **brglm2 (AS-mean)** | {brglm2_ver} | {r_blas} |
-| **brglm2 (MPL_Jeffreys)** | {brglm2_ver} | {r_blas} |
-| **logistf** | {logistf_ver} | {r_blas} |
-
-## Benchmark Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Observations (n) | {N_SAMPLES:,} |
-| Event rate | {EVENT_RATE:.0%} |
-| Features (k) | {", ".join(str(k) for k in df["k"].tolist())} |
-| Runs per config | {n_runs} |
-| Solver max_iter | {MAX_ITER} |
-| Solver tolerance | {TOL} |
-
-brglm2 runs with `check_aliasing=FALSE` since the benchmark data is guaranteed full rank.
-
-All implementations agree within chosen tolerance (coefficients {COEF_TOL}, CIs {CI_TOL}, p-values {PVAL_TOL}).
-
-## Results
-
-![Benchmark scaling plot]({plot_filename})
-
-### Fit Only
-
-Time to fit the model and perform Wald inference. Values are minimum time across runs in milliseconds.
-
-| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
-|--:|------:|------:|------------:|-------------:|--------:|
-"""
-
-    for _, row in df.iterrows():
-        report += (
-            f"| {int(row['k']):3d} | "
-            f"{row['numba_fit_ms']:.1f} | "
-            f"{row['numpy_fit_ms']:.1f} | "
-            f"{row['brglm2_as_fit_ms']:.1f} | "
-            f"{row['brglm2_mpl_fit_ms']:.1f} | "
-            f"{row['logistf_fit_ms']:.1f} |\n"
-        )
-
-    report += f"""
-### Full Workflow (Fit + LRT + Profile CI)
-
-Time to fit the model, compute penalized likelihood ratio test p-values for all coefficients, and profile likelihood confidence intervals.
-
-| k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
-|--:|------:|------:|--------:|
-"""
-
-    for _, row in df.iterrows():
-        report += (
-            f"| {int(row['k']):3d} | "
-            f"{row['numba_full_ms']:.1f} | "
-            f"{row['numpy_full_ms']:.1f} | "
-            f"{row['logistf_full_ms']:.1f} |\n"
-        )
-
-    report += f"""
-
----
-
-"""
-
-    if command:
-        # Format command for shell, quoting args with spaces
-        cmd_str = "python " + " ".join(shlex.quote(arg) for arg in command)
-        report += f"""
-## Command used to run benchmark
-
-```bash
-{cmd_str}
-```
-"""
-
-    with open(report_path, "w") as f:
-        f.write(report)
-
-    print(f"Report saved to {report_path}", file=sys.stderr)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark firthmodels vs logistf and brglm2"
@@ -1185,12 +1060,6 @@ def main():
         help="Save plot to file (e.g., benchmark_scaling.png)",
     )
     parser.add_argument(
-        "--report",
-        type=str,
-        default=None,
-        help="Generate markdown report (e.g., benchmark_report.md). Also generates plot.",
-    )
-    parser.add_argument(
         "--saved",
         type=str,
         default=None,
@@ -1219,39 +1088,7 @@ def main():
         metavar="K",
         help="Reduce logistf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 25)",
     )
-    parser.add_argument(
-        "--regenerate-report",
-        action="store_true",
-        help="Regenerate report/plot from --saved CSV without running benchmarks.",
-    )
     args = parser.parse_args()
-
-    # Handle --regenerate-report: skip benchmarks, just regenerate output
-    if args.regenerate_report:
-        if not args.saved:
-            parser.error("--regenerate-report requires --saved")
-        if not args.report and not args.plot:
-            parser.error("--regenerate-report requires --report or --plot")
-
-        df = pd.read_csv(args.saved)
-        version_info = get_python_version_info()
-        version_info.update(get_r_version_info())
-
-        if args.plot:
-            save_plot(df, args.plot, version_info)
-
-        if args.report:
-            report_path = Path(args.report)
-            plot_path = (
-                Path(args.plot) if args.plot else report_path.with_suffix(".png")
-            )
-            if not args.plot:
-                save_plot(df, str(plot_path), version_info)
-            generate_report(
-                df, args.report, plot_path.name, args.n_runs, version_info, sys.argv
-            )
-
-        return
 
     k_values = (
         K_VALUES
@@ -1315,18 +1152,6 @@ def main():
 
     if args.plot:
         save_plot(df, args.plot, version_info)
-
-    if args.report:
-        # Generate plot alongside report if not already specified
-        report_path = Path(args.report)
-        plot_path = report_path.with_suffix(".png")
-        if not args.plot:
-            save_plot(df, str(plot_path), version_info)
-        else:
-            plot_path = Path(args.plot)
-        generate_report(
-            df, args.report, plot_path.name, args.n_runs, version_info, sys.argv
-        )
 
 
 if __name__ == "__main__":
