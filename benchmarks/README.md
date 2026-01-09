@@ -48,7 +48,7 @@ All implementations agree within chosen tolerance (coefficients 1e-06, CIs 1e-06
 
 ### Results
 
-![Logistic benchmark scaling plot](logistic_report.png)
+![Logistic benchmark scaling plot](logistic_results.png)
 
 #### Fit Only
 
@@ -57,15 +57,15 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
 |--:|------:|------:|------------:|-------------:|--------:|
 |   5 | 0.5 | 1.3 | 4.2 | 4.2 | 2.0 |
-|  10 | 1.1 | 1.6 | 7.3 | 8.4 | 4.3 |
-|  15 | 1.2 | 1.8 | 8.0 | 9.1 | 6.9 |
-|  20 | 1.4 | 2.0 | 9.4 | 9.6 | 15.6 |
-|  25 | 1.7 | 2.5 | 11.7 | 13.0 | 24.2 |
-|  30 | 1.9 | 2.6 | 12.6 | 12.5 | 29.8 |
-|  35 | 2.1 | 3.0 | 14.8 | 14.9 | 42.1 |
-|  40 | 2.6 | 3.5 | 16.6 | 16.7 | 53.5 |
-|  45 | 3.5 | 4.3 | 18.5 | 18.6 | 70.3 |
-|  50 | 4.1 | 5.2 | 24.2 | 23.1 | 85.5 |
+|  10 | 1.1 | 1.6 | 7.9 | 7.2 | 4.3 |
+|  15 | 1.2 | 1.8 | 8.2 | 8.2 | 7.6 |
+|  20 | 1.4 | 2.0 | 9.3 | 9.4 | 15.7 |
+|  25 | 1.7 | 2.5 | 11.7 | 11.7 | 24.2 |
+|  30 | 1.9 | 2.7 | 12.6 | 12.9 | 30.2 |
+|  35 | 2.1 | 3.0 | 14.9 | 14.8 | 42.0 |
+|  40 | 2.6 | 3.5 | 16.9 | 16.8 | 52.7 |
+|  45 | 3.3 | 4.4 | 18.6 | 19.8 | 70.3 |
+|  50 | 4.1 | 6.1 | 23.9 | 24.2 | 86.0 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -73,16 +73,16 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
 |--:|------:|------:|--------:|
-|   5 | 5.1 | 11.3 | 13.6 |
-|  10 | 22.8 | 43.4 | 82.3 |
-|  15 | 34.1 | 67.4 | 157.4 |
-|  20 | 54.3 | 99.1 | 449.5 |
-|  25 | 91.3 | 160.7 | 921.3 |
-|  30 | 126.6 | 206.2 | 1337.0 |
-|  35 | 163.9 | 279.0 | 2294.7 |
-|  40 | 234.5 | 365.5 | 3314.2 |
-|  45 | 328.3 | 471.0 | 4844.6 |
-|  50 | 454.9 | 631.1 | 6403.8 |
+|   5 | 5.1 | 11.5 | 13.6 |
+|  10 | 23.1 | 44.0 | 72.1 |
+|  15 | 33.6 | 68.1 | 157.6 |
+|  20 | 54.2 | 98.9 | 452.6 |
+|  25 | 91.4 | 158.9 | 931.5 |
+|  30 | 127.3 | 201.6 | 1350.4 |
+|  35 | 165.2 | 270.5 | 2322.4 |
+|  40 | 235.8 | 363.8 | 3334.4 |
+|  45 | 322.2 | 496.3 | 4692.8 |
+|  50 | 452.2 | 646.9 | 6501.0 |
 
 
 ---
@@ -116,7 +116,7 @@ All implementations agree within chosen tolerance (coefficients 1e-06, CIs 1e-06
 
 ### Results
 
-![Cox benchmark scaling plot](cox_report.png)
+![Cox benchmark scaling plot](cox_results.png)
 
 #### Fit Only
 
@@ -124,12 +124,12 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 1.5 | 4.2 | 3.4 |
-|  10 | 1.8 | 5.2 | 22.2 |
-|  15 | 2.1 | 6.7 | 49.7 |
-|  20 | 4.3 | 13.6 | 114.3 |
-|  25 | 5.3 | 33.1 | 225.3 |
-|  30 | 7.3 | 54.1 | 391.3 |
+|   5 | 2.8 | 4.3 | 3.5 |
+|  10 | 1.7 | 5.3 | 22.2 |
+|  15 | 2.1 | 6.9 | 49.9 |
+|  20 | 4.3 | 13.5 | 113.9 |
+|  25 | 5.2 | 32.9 | 225.5 |
+|  30 | 7.3 | 55.6 | 391.0 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -137,12 +137,12 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 4.4 | 19.9 | 23.7 |
-|  10 | 12.9 | 65.3 | 363.5 |
-|  15 | 36.2 | 176.7 | 1694.1 |
-|  20 | 114.7 | 508.2 | 5680.2 |
-|  25 | 189.1 | 2122.0 | 16105.8 |
-|  30 | 295.1 | 3875.0 | 34743.9 |
+|   5 | 4.4 | 19.9 | 23.8 |
+|  10 | 12.9 | 66.0 | 364.4 |
+|  15 | 36.3 | 177.5 | 1693.6 |
+|  20 | 114.2 | 504.9 | 5675.5 |
+|  25 | 189.4 | 2121.2 | 16062.0 |
+|  30 | 297.1 | 3870.1 | 34707.3 |
 
 
 ---
@@ -151,17 +151,11 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 ```bash
 # Run logistic regression benchmarks
-python benchmarks/benchmark_logistic.py \
-    --csv benchmarks/logistic_results.csv \
-    --plot benchmarks/logistic_report.png \
-    --n-runs 30
+python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.csv
 
 # Run Cox PH benchmarks
-python benchmarks/benchmark_cox.py \
-    --csv benchmarks/cox_results.csv \
-    --plot benchmarks/cox_report.png \
-    --n-runs 15
+python benchmarks/benchmark_cox.py -o benchmarks/cox_results.csv
 
-# Regenerate this README
-python benchmarks/generate_readme.py
+# Generate plots and README
+python benchmarks/generate_report.py
 ```

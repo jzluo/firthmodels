@@ -29,7 +29,7 @@ from firthmodels import FirthCoxPH
 N_SAMPLES = 500
 EVENT_RATE = 0.20
 K_VALUES = list(range(5, 35, 5))
-N_RUNS = 10
+N_RUNS = 15
 BASE_SEED = 0
 
 # Solver parameters

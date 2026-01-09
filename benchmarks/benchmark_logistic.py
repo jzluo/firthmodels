@@ -28,7 +28,7 @@ from firthmodels import FirthLogisticRegression
 N_SAMPLES = 1000
 EVENT_RATE = 0.20
 K_VALUES = list(range(5, 55, 5))  # [5, 10, 15, ..., 50]
-N_RUNS = 20
+N_RUNS = 30
 BASE_SEED = 42
 
 # Solver parameters
