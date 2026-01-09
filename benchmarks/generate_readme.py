@@ -5,9 +5,7 @@ Usage:
     python benchmarks/generate_readme.py
     python benchmarks/generate_readme.py --logistic-results path/to/logistic.csv
     python benchmarks/generate_readme.py --cox-results path/to/cox.csv
-
-Outputs:
-    benchmarks/README.md
+    python benchmarks/generate_readme.py -o path/to/output.md
 """
 
 import argparse
@@ -637,6 +635,13 @@ def main():
         default=str(BENCHMARKS_DIR / "cox_results.csv"),
         help="Path to Cox results CSV (default: benchmarks/cox_results.csv)",
     )
+    parser.add_argument(
+        "-o",
+        "--out",
+        type=str,
+        default=str(BENCHMARKS_DIR / "README.md"),
+        help="Output path for README (default: benchmarks/README.md)",
+    )
     args = parser.parse_args()
 
     logistic_csv = Path(args.logistic_results)
@@ -673,10 +678,10 @@ def main():
     readme_content = generate_readme(logistic_df, cox_df, version_info)
 
     # Write output
-    with open(README_PATH, "w") as f:
+    with open(args.out, "w") as f:
         f.write(readme_content)
 
-    print(f"README written to {README_PATH}", file=sys.stderr)
+    print(f"README written to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
