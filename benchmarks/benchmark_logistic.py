@@ -41,6 +41,9 @@ COEF_TOL = 1e-6  # Coefficients
 CI_TOL = 1e-6  # Confidence intervals (profile CI)
 PVAL_TOL = 1e-6  # P-values
 
+# Reduce logistf benchmark runs for large k
+LOGISTF_REDUCE_AFTER = 25
+
 
 # -----------------------------------------------------------------------------
 # Data generation
@@ -605,7 +608,7 @@ def run_benchmarks(
     k_values: list[int] = K_VALUES,
     n_runs: int = N_RUNS,
     skip_verification: bool = False,
-    logistf_reduce_after: int | None = 25,
+    logistf_reduce_after: int | None = LOGISTF_REDUCE_AFTER,
     saved: str | None = None,
     run_firthmodels: bool = True,
     run_brglm2: bool = True,
@@ -963,9 +966,9 @@ def main():
     parser.add_argument(
         "--logistf-reduce-after",
         type=int,
-        default=25,
+        default=LOGISTF_REDUCE_AFTER,
         metavar="K",
-        help="Reduce logistf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 25)",
+        help=f"Reduce logistf runs to max(3, n/3) for k > K. Use 0 to disable. (default: {LOGISTF_REDUCE_AFTER})",
     )
     args = parser.parse_args()
 
@@ -994,8 +997,9 @@ def main():
         # Default: run everything
         run_firthmodels, run_brglm2, run_logistf = True, True, True
 
-    # If no --saved and some libs not selected, must run them (with message)
-    if not args.saved:
+    # If not all libraries selected and no --saved, error
+    all_selected = run_firthmodels and run_brglm2 and run_logistf
+    if not args.saved and not all_selected:
         missing = []
         if not run_firthmodels:
             missing.append("firthmodels")
@@ -1003,12 +1007,10 @@ def main():
             missing.append("brglm2")
         if not run_logistf:
             missing.append("logistf")
-        if missing:
-            print(
-                f"No --saved provided; also running {', '.join(missing)}",
-                file=sys.stderr,
-            )
-            run_firthmodels = run_brglm2 = run_logistf = True
+        raise ValueError(
+            f"To run a subset of benchmarks, provide --saved with results for: "
+            f"{', '.join(missing)}"
+        )
 
     # Run benchmarks
     df, version_info = run_benchmarks(

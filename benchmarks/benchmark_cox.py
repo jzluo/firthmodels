@@ -43,6 +43,9 @@ COEF_TOL = 1e-6
 CI_TOL = 1e-6
 PVAL_TOL = 1e-6
 
+# Reduce coxphf benchmark runs for large k
+COXPHF_REDUCE_AFTER = 5
+
 
 # -----------------------------------------------------------------------------
 # Data generation
@@ -494,7 +497,7 @@ def run_benchmarks(
     k_values: list[int] = K_VALUES,
     n_runs: int = N_RUNS,
     skip_verification: bool = False,
-    coxphf_reduce_after: int | None = 25,
+    coxphf_reduce_after: int | None = COXPHF_REDUCE_AFTER,
     saved: str | None = None,
     run_firthmodels: bool = True,
     run_coxphf: bool = True,
@@ -762,9 +765,9 @@ def main():
     parser.add_argument(
         "--coxphf-reduce-after",
         type=int,
-        default=5,
+        default=COXPHF_REDUCE_AFTER,
         metavar="K",
-        help="Reduce coxphf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 5)",
+        help=f"Reduce coxphf runs to max(3, n/3) for k > K. Use 0 to disable. (default: {COXPHF_REDUCE_AFTER})",
     )
     args = parser.parse_args()
 
@@ -791,19 +794,17 @@ def main():
         # Default: run everything
         run_firthmodels, run_coxphf = True, True
 
-    # If no --saved and some lib not selected, must run it
-    if not args.saved:
+    # If not all libraries selected and no --saved, error
+    if not args.saved and not (run_firthmodels and run_coxphf):
         missing = []
         if not run_firthmodels:
             missing.append("firthmodels")
         if not run_coxphf:
             missing.append("coxphf")
-        if missing:
-            print(
-                f"No --saved provided; also running {', '.join(missing)}",
-                file=sys.stderr,
-            )
-            run_firthmodels = run_coxphf = True
+        raise ValueError(
+            f"To run a subset of benchmarks, provide --saved with results for: "
+            f"{', '.join(missing)}"
+        )
 
     # Run benchmarks
     df, version_info = run_benchmarks(
