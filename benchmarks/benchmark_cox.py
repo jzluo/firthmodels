@@ -374,8 +374,8 @@ def get_python_version_info() -> dict[str, str]:
         if blas_info.get("found"):
             lib_dir = blas_info.get("lib directory", "")
             name = blas_info.get("name", "unknown")
-            version = blas_info.get("version", "")
-            info["numpy_blas"] = f"{lib_dir} ({name} {version})".strip()
+            blas_version = blas_info.get("version", "")
+            info["numpy_blas"] = f"{lib_dir} ({name} {blas_version})".strip()
         else:
             info["numpy_blas"] = "unknown"
     except Exception:
@@ -420,6 +420,74 @@ def compute_min(times: np.ndarray) -> float:
 
 
 # -----------------------------------------------------------------------------
+# Saved results loading
+# -----------------------------------------------------------------------------
+def load_saved_results(
+    saved_csv: str,
+    k_values: list[int],
+    load_firthmodels: bool = False,
+    load_coxphf: bool = True,
+) -> tuple[pd.DataFrame, dict[int, dict] | None]:
+    """Load results from a saved CSV file.
+
+    Parameters
+    ----------
+    saved_csv : str
+        Path to CSV with previous results.
+    k_values : list of int
+        Which k values to load.
+    load_firthmodels : bool
+        Whether to load firthmodels timing columns.
+    load_coxphf : bool
+        Whether to load coxphf results.
+
+    Returns
+    -------
+    saved_df : DataFrame
+        The loaded DataFrame (for timing columns).
+    coxphf_results : dict or None
+        coxphf results if load_coxphf=True, else None.
+    """
+    saved_df = pd.read_csv(saved_csv)
+
+    # Determine required columns based on what we're loading
+    required_cols = {"k", "n"}
+    if load_firthmodels:
+        required_cols.update(
+            {"numba_fit_ms", "numpy_fit_ms", "numba_full_ms", "numpy_full_ms"}
+        )
+    if load_coxphf:
+        required_cols.update(
+            {
+                "coxphf_fit_ms",
+                "coxphf_full_ms",
+                "coxphf_fit_coef",
+                "coxphf_full_coef",
+                "coxphf_full_ci",
+                "coxphf_full_pval",
+            }
+        )
+
+    missing_cols = required_cols - set(saved_df.columns)
+    if missing_cols:
+        raise ValueError(f"Saved CSV missing columns: {missing_cols}")
+
+    saved_n = int(saved_df["n"].iloc[0])
+    if saved_n != N_SAMPLES:
+        raise ValueError(
+            f"Saved CSV was created with n={saved_n}, but current N_SAMPLES={N_SAMPLES}."
+        )
+
+    saved_k = set(saved_df["k"].tolist())
+    missing = set(k_values) - saved_k
+    if missing:
+        raise ValueError(f"k values {missing} not in saved CSV")
+
+    # No need to parse JSON - we copy strings directly from saved_df rows
+    return saved_df, None
+
+
+# -----------------------------------------------------------------------------
 # Main benchmark runner
 # -----------------------------------------------------------------------------
 def run_benchmarks(
@@ -427,11 +495,28 @@ def run_benchmarks(
     n_runs: int = N_RUNS,
     skip_verification: bool = False,
     coxphf_reduce_after: int | None = 25,
+    saved: str | None = None,
     run_firthmodels: bool = True,
     run_coxphf: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, str]]:
     """Run all benchmarks and return results as DataFrame."""
     version_info = get_python_version_info()
+
+    # Load saved results for libraries we're not running
+    saved_df = None
+    coxphf_results: dict[int, dict] | None = None
+
+    if saved:
+        load_firthmodels = not run_firthmodels
+        load_coxphf = not run_coxphf
+        if load_firthmodels or load_coxphf:
+            print(f"Loading saved results from {saved}...", file=sys.stderr, flush=True)
+            saved_df, coxphf_results = load_saved_results(
+                saved,
+                k_values,
+                load_firthmodels=load_firthmodels,
+                load_coxphf=load_coxphf,
+            )
 
     if run_coxphf:
         print("Validating R packages...", file=sys.stderr, flush=True)
@@ -489,7 +574,8 @@ def run_benchmarks(
                     }
 
         # --- R benchmarks ---
-        coxphf_results: dict[int, dict] = {}
+        if coxphf_results is None:
+            coxphf_results = {}
         if run_coxphf:
             if coxphf_reduce_after is not None:
                 k_low = [k for k in k_values if k <= coxphf_reduce_after]
@@ -558,6 +644,12 @@ def run_benchmarks(
                 "event_rate": event.sum() / N_SAMPLES,
             }
 
+            # Get saved row if needed for any library
+            saved_row = None
+            if saved_df is not None:
+                saved_row = saved_df[saved_df["k"] == k].iloc[0]
+
+            # Python timings
             if run_firthmodels:
                 py_numba = py_results["numba"][k]
                 py_numpy = py_results["numpy"][k]
@@ -565,7 +657,14 @@ def run_benchmarks(
                 row["numpy_fit_ms"] = compute_min(py_numpy["fit_times"]) * 1000
                 row["numba_full_ms"] = compute_min(py_numba["full_times"]) * 1000
                 row["numpy_full_ms"] = compute_min(py_numpy["full_times"]) * 1000
+            else:
+                assert saved_row is not None
+                row["numba_fit_ms"] = saved_row["numba_fit_ms"]
+                row["numpy_fit_ms"] = saved_row["numpy_fit_ms"]
+                row["numba_full_ms"] = saved_row["numba_full_ms"]
+                row["numpy_full_ms"] = saved_row["numpy_full_ms"]
 
+            # coxphf timings
             if run_coxphf:
                 r = coxphf_results[k]
                 row["coxphf_fit_ms"] = compute_min(r["fit_times"]) * 1000
@@ -575,6 +674,14 @@ def run_benchmarks(
                 row["coxphf_full_coef"] = json.dumps(r["full_coef"].tolist())
                 row["coxphf_full_ci"] = json.dumps(r["full_ci"].tolist())
                 row["coxphf_full_pval"] = json.dumps(r["full_pval"].tolist())
+            else:
+                assert saved_row is not None
+                row["coxphf_fit_ms"] = saved_row["coxphf_fit_ms"]
+                row["coxphf_full_ms"] = saved_row["coxphf_full_ms"]
+                row["coxphf_fit_coef"] = saved_row["coxphf_fit_coef"]
+                row["coxphf_full_coef"] = saved_row["coxphf_full_coef"]
+                row["coxphf_full_ci"] = saved_row["coxphf_full_ci"]
+                row["coxphf_full_pval"] = saved_row["coxphf_full_pval"]
 
             results.append(row)
 
@@ -606,97 +713,6 @@ def print_table(df: pd.DataFrame) -> None:
         )
 
 
-def save_plot(
-    df: pd.DataFrame,
-    output_path: str = "benchmark_cox_scaling.png",
-    version_info: dict[str, str] | None = None,
-) -> None:
-    """Save scaling plot to file as 2x2 grid."""
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib not installed, skipping plot", file=sys.stderr)
-        return
-
-    from matplotlib.ticker import MaxNLocator
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-
-    if version_info:
-        py_info = f"firthmodels {version_info.get('firthmodels_version', '?')}"
-        py_blas = f"BLAS: {version_info.get('numpy_blas', '?')}"
-        r_info = f"coxphf {version_info.get('coxphf_version', '?')}"
-        r_blas = f"BLAS: {version_info.get('r_blas', '?')}"
-        fig.suptitle(f"{py_info} | {py_blas}\n{r_info} | {r_blas}", fontsize=10, y=0.98)
-
-    # --- Top row: all libraries, full range ---
-    ax = axes[0, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
-    ax.plot(df["k"], df["coxphf_fit_ms"], "s-", label="coxphf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_title("Fit Only")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    ax = axes[0, 1]
-    ax.plot(
-        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
-    )
-    ax.plot(
-        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
-    )
-    ax.plot(df["k"], df["coxphf_full_ms"], "s-", label="coxphf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_title("Full Workflow")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    # --- Bottom row: zoomed ---
-    last_row = df.iloc[-1]
-    locator = MaxNLocator(nbins="auto", steps=[1, 2, 2.5, 5, 10])
-
-    fit_max = max(last_row["numpy_fit_ms"], last_row["numba_fit_ms"])
-    fit_ticks = locator.tick_values(0, fit_max * 1.1)
-    fit_ylim = fit_ticks[fit_ticks >= fit_max][0]
-
-    full_max = last_row["numpy_full_ms"]
-    full_ticks = locator.tick_values(0, full_max * 1.1)
-    full_ylim = full_ticks[full_ticks >= full_max][0]
-
-    ax = axes[1, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
-    ax.plot(df["k"], df["coxphf_fit_ms"], "s-", label="coxphf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_ylim(0, fit_ylim)
-    ax.set_title("Fit Only (zoomed)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    ax = axes[1, 1]
-    ax.plot(
-        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
-    )
-    ax.plot(
-        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
-    )
-    ax.plot(df["k"], df["coxphf_full_ms"], "s-", label="coxphf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_ylim(0, full_ylim)
-    ax.set_title("Full Workflow (zoomed)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    print(f"Plot saved to {output_path}", file=sys.stderr)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark firthmodels FirthCoxPH vs R coxphf"
@@ -720,23 +736,35 @@ def main():
         help="Skip numerical agreement verification",
     )
     parser.add_argument(
-        "--csv",
+        "-o",
+        "--out",
         type=str,
         default=None,
         help="Save results to CSV file",
     )
     parser.add_argument(
-        "--plot",
+        "--saved",
         type=str,
         default=None,
-        help="Save plot to file (e.g., benchmark_cox_scaling.png)",
+        metavar="CSV",
+        help="Load non-selected libraries from this CSV.",
+    )
+    parser.add_argument(
+        "--firthmodels",
+        action="store_true",
+        help="Run firthmodels.",
+    )
+    parser.add_argument(
+        "--coxphf",
+        action="store_true",
+        help="Run coxphf.",
     )
     parser.add_argument(
         "--coxphf-reduce-after",
         type=int,
-        default=15,
+        default=5,
         metavar="K",
-        help="Reduce coxphf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 25)",
+        help="Reduce coxphf runs to max(3, n/3) for k > K. Use 0 to disable. (default: 5)",
     )
     args = parser.parse_args()
 
@@ -750,23 +778,50 @@ def main():
         args.coxphf_reduce_after if args.coxphf_reduce_after > 0 else None
     )
 
+    # Determine which libraries to run
+    any_selected = args.firthmodels or args.coxphf
+
+    if any_selected:
+        run_firthmodels = args.firthmodels
+        run_coxphf = args.coxphf
+    elif args.saved:
+        # --saved alone = run firthmodels only
+        run_firthmodels, run_coxphf = True, False
+    else:
+        # Default: run everything
+        run_firthmodels, run_coxphf = True, True
+
+    # If no --saved and some lib not selected, must run it
+    if not args.saved:
+        missing = []
+        if not run_firthmodels:
+            missing.append("firthmodels")
+        if not run_coxphf:
+            missing.append("coxphf")
+        if missing:
+            print(
+                f"No --saved provided; also running {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            run_firthmodels = run_coxphf = True
+
     # Run benchmarks
     df, version_info = run_benchmarks(
         k_values=k_values,
         n_runs=args.n_runs,
         skip_verification=args.skip_verification,
         coxphf_reduce_after=coxphf_reduce_after,
+        saved=args.saved,
+        run_firthmodels=run_firthmodels,
+        run_coxphf=run_coxphf,
     )
 
     # Output
     print_table(df)
 
-    if args.csv:
-        df.to_csv(args.csv, index=False)
-        print(f"\nResults saved to {args.csv}", file=sys.stderr)
-
-    if args.plot:
-        save_plot(df, args.plot, version_info)
+    if args.out:
+        df.to_csv(args.out, index=False)
+        print(f"\nResults saved to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ import pandas as pd
 BENCHMARKS_DIR = Path(__file__).parent
 LOGISTIC_CSV = BENCHMARKS_DIR / "logistic_results.csv"
 COX_CSV = BENCHMARKS_DIR / "cox_results.csv"
+LOGISTIC_PLOT = BENCHMARKS_DIR / "logistic_report.png"
+COX_PLOT = BENCHMARKS_DIR / "cox_report.png"
 README_PATH = BENCHMARKS_DIR / "README.md"
 
 # Benchmark parameters (must match the individual benchmark scripts)
@@ -189,6 +191,215 @@ def get_r_version_info() -> dict[str, str]:
         pass  # R not installed, keep defaults
 
     return info
+
+
+# -----------------------------------------------------------------------------
+# Plotting
+# -----------------------------------------------------------------------------
+def save_logistic_plot(
+    df: pd.DataFrame,
+    output_path: str,
+    version_info: dict[str, str] | None = None,
+) -> None:
+    """Save logistic benchmark scaling plot to file as 2x2 grid.
+
+    Top row: all libraries
+    Bottom row: truncate logistf at crossover point for better readability
+    """
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+    except ImportError:
+        print("matplotlib not installed, skipping plot", file=sys.stderr)
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+
+    # Add version info as suptitle
+    if version_info:
+        py_info = f"firthmodels {version_info.get('firthmodels_version', '?')}"
+        r_info = (
+            f"logistf {version_info.get('logistf_version', '?')}, "
+            f"brglm2 {version_info.get('brglm2_version', '?')}"
+        )
+        fig.suptitle(f"{py_info} | {r_info}", fontsize=10, y=0.98)
+
+    # --- Top row: all libraries, full range ---
+
+    # Fit only (all)
+    ax = axes[0, 0]
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
+    ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
+    ax.plot(
+        df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
+    )
+    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_title("Fit Only")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Full workflow (all)
+    ax = axes[0, 1]
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
+    ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_title("Full Workflow")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # --- Bottom row: limit y-axis to focus on faster implementations ---
+    # logistf line may go off the top of the chart
+    last_row = df.iloc[-1]
+
+    # Fit-only: y-limit based on max of numpy/brglm2 at final k
+    fit_max = max(
+        last_row["numpy_fit_ms"],
+        last_row["brglm2_as_fit_ms"],
+        last_row["brglm2_mpl_fit_ms"],
+    )
+    locator = MaxNLocator(nbins="auto", steps=[1, 2, 2.5, 5, 10])
+    fit_ticks = locator.tick_values(0, fit_max * 1.1)
+    fit_ylim = fit_ticks[fit_ticks >= fit_max][0]
+
+    # Full workflow: y-limit based on numpy at final k
+    full_max = last_row["numpy_full_ms"]
+    full_ticks = locator.tick_values(0, full_max * 1.1)
+    full_ylim = full_ticks[full_ticks >= full_max][0]
+
+    # Fit only (zoomed)
+    ax = axes[1, 0]
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
+    ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
+    ax.plot(
+        df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
+    )
+    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_ylim(0, fit_ylim)
+    ax.set_title("Fit Only (zoomed)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Full workflow (zoomed)
+    ax = axes[1, 1]
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
+    ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_ylim(0, full_ylim)
+    ax.set_title("Full Workflow (zoomed)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"Plot saved to {output_path}", file=sys.stderr)
+
+
+def save_cox_plot(
+    df: pd.DataFrame,
+    output_path: str,
+    version_info: dict[str, str] | None = None,
+) -> None:
+    """Save Cox benchmark scaling plot to file as 2x2 grid."""
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+    except ImportError:
+        print("matplotlib not installed, skipping plot", file=sys.stderr)
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+
+    if version_info:
+        py_info = f"firthmodels {version_info.get('firthmodels_version', '?')}"
+        r_info = f"coxphf {version_info.get('coxphf_version', '?')}"
+        fig.suptitle(f"{py_info} | {r_info}", fontsize=10, y=0.98)
+
+    # --- Top row: all libraries, full range ---
+    ax = axes[0, 0]
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
+    ax.plot(df["k"], df["coxphf_fit_ms"], "s-", label="coxphf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_title("Fit Only")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[0, 1]
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
+    ax.plot(df["k"], df["coxphf_full_ms"], "s-", label="coxphf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_title("Full Workflow")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # --- Bottom row: zoomed ---
+    last_row = df.iloc[-1]
+    locator = MaxNLocator(nbins="auto", steps=[1, 2, 2.5, 5, 10])
+
+    fit_max = max(last_row["numpy_fit_ms"], last_row["numba_fit_ms"])
+    fit_ticks = locator.tick_values(0, fit_max * 1.1)
+    fit_ylim = fit_ticks[fit_ticks >= fit_max][0]
+
+    full_max = last_row["numpy_full_ms"]
+    full_ticks = locator.tick_values(0, full_max * 1.1)
+    full_ylim = full_ticks[full_ticks >= full_max][0]
+
+    ax = axes[1, 0]
+    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
+    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
+    ax.plot(df["k"], df["coxphf_fit_ms"], "s-", label="coxphf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_ylim(0, fit_ylim)
+    ax.set_title("Fit Only (zoomed)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1, 1]
+    ax.plot(
+        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
+    )
+    ax.plot(
+        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
+    )
+    ax.plot(df["k"], df["coxphf_full_ms"], "s-", label="coxphf", linewidth=2)
+    ax.set_xlabel("Number of features")
+    ax.set_ylabel("Time (ms)")
+    ax.set_ylim(0, full_ylim)
+    ax.set_title("Full Workflow (zoomed)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"Plot saved to {output_path}", file=sys.stderr)
 
 
 # -----------------------------------------------------------------------------
@@ -398,18 +609,12 @@ Benchmarking of implementations of Firth-penalized logistic regression and Cox r
 
 ```bash
 # Run logistic regression benchmarks
-python benchmarks/benchmark_logistic.py \\
-    --csv benchmarks/logistic_results.csv \\
-    --plot benchmarks/logistic_report.png \\
-    --n-runs 30
+python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.csv
 
 # Run Cox PH benchmarks
-python benchmarks/benchmark_cox.py \\
-    --csv benchmarks/cox_results.csv \\
-    --plot benchmarks/cox_report.png \\
-    --n-runs 15
+python benchmarks/benchmark_cox.py -o benchmarks/cox_results.csv
 
-# Regenerate this README
+# Generate plots and README
 python benchmarks/generate_readme.py
 ```
 """
@@ -438,6 +643,11 @@ def main():
     print("Collecting version info...", file=sys.stderr)
     version_info = get_python_version_info()
     version_info.update(get_r_version_info())
+
+    # Generate plots
+    print("Generating plots...", file=sys.stderr)
+    save_logistic_plot(logistic_df, str(LOGISTIC_PLOT), version_info)
+    save_cox_plot(cox_df, str(COX_PLOT), version_info)
 
     # Generate README
     print("Generating README...", file=sys.stderr)

@@ -909,122 +909,6 @@ def print_table(df: pd.DataFrame) -> None:
         )
 
 
-def save_plot(
-    df: pd.DataFrame,
-    output_path: str = "benchmark_scaling.png",
-    version_info: dict[str, str] | None = None,
-) -> None:
-    """Save scaling plot to file as 2x2 grid.
-
-    Top row: all libraries
-    Bottom row: truncate logistf at crossover point for better readability
-    """
-    try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib not installed, skipping plot", file=sys.stderr)
-        return
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
-
-    # Add version info as suptitle
-    if version_info:
-        py_info = f"firthmodels {version_info.get('firthmodels_version', '?')}"
-        py_blas = f"BLAS: {version_info.get('numpy_blas', '?')}"
-        r_info = f"logistf {version_info.get('logistf_version', '?')}, brglm2 {version_info.get('brglm2_version', '?')}"
-        r_blas = f"BLAS: {version_info.get('r_blas', '?')}"
-        fig.suptitle(f"{py_info} | {py_blas}\n{r_info} | {r_blas}", fontsize=10, y=0.98)
-
-    # --- Top row: all libraries, full range ---
-
-    # Fit only (all)
-    ax = axes[0, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
-    ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
-    ax.plot(
-        df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
-    )
-    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_title("Fit Only")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    # Full workflow (all)
-    ax = axes[0, 1]
-    ax.plot(
-        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
-    )
-    ax.plot(
-        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
-    )
-    ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_title("Full Workflow")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    # --- Bottom row: limit y-axis to focus on faster implementations ---
-    # logistf line may go off the top of the chart
-    from matplotlib.ticker import MaxNLocator
-
-    last_row = df.iloc[-1]
-
-    # Fit-only: y-limit based on max of numpy/brglm2 at final k
-    fit_max = max(
-        last_row["numpy_fit_ms"],
-        last_row["brglm2_as_fit_ms"],
-        last_row["brglm2_mpl_fit_ms"],
-    )
-    locator = MaxNLocator(nbins="auto", steps=[1, 2, 2.5, 5, 10])
-    fit_ticks = locator.tick_values(0, fit_max * 1.1)
-    fit_ylim = fit_ticks[fit_ticks >= fit_max][0]
-
-    # Full workflow: y-limit based on numpy at final k
-    full_max = last_row["numpy_full_ms"]
-    full_ticks = locator.tick_values(0, full_max * 1.1)
-    full_ylim = full_ticks[full_ticks >= full_max][0]
-
-    # Fit only (zoomed)
-    ax = axes[1, 0]
-    ax.plot(df["k"], df["numba_fit_ms"], "o-", label="firthmodels (numba)", linewidth=2)
-    ax.plot(df["k"], df["numpy_fit_ms"], "x-", label="firthmodels (numpy)", linewidth=2)
-    ax.plot(df["k"], df["logistf_fit_ms"], "s-", label="logistf", linewidth=2)
-    ax.plot(
-        df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
-    )
-    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_ylim(0, fit_ylim)
-    ax.set_title("Fit Only (zoomed)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    # Full workflow (zoomed)
-    ax = axes[1, 1]
-    ax.plot(
-        df["k"], df["numba_full_ms"], "o-", label="firthmodels (numba)", linewidth=2
-    )
-    ax.plot(
-        df["k"], df["numpy_full_ms"], "x-", label="firthmodels (numpy)", linewidth=2
-    )
-    ax.plot(df["k"], df["logistf_full_ms"], "s-", label="logistf", linewidth=2)
-    ax.set_xlabel("Number of features")
-    ax.set_ylabel("Time (ms)")
-    ax.set_ylim(0, full_ylim)
-    ax.set_title("Full Workflow (zoomed)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    print(f"Plot saved to {output_path}", file=sys.stderr)
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Benchmark firthmodels vs logistf and brglm2"
@@ -1048,16 +932,11 @@ def main():
         help="Skip numerical agreement verification",
     )
     parser.add_argument(
-        "--csv",
+        "-o",
+        "--out",
         type=str,
         default=None,
         help="Save results to CSV file",
-    )
-    parser.add_argument(
-        "--plot",
-        type=str,
-        default=None,
-        help="Save plot to file (e.g., benchmark_scaling.png)",
     )
     parser.add_argument(
         "--saved",
@@ -1146,12 +1025,9 @@ def main():
     # Output
     print_table(df)
 
-    if args.csv:
-        df.to_csv(args.csv, index=False)
-        print(f"\nResults saved to {args.csv}", file=sys.stderr)
-
-    if args.plot:
-        save_plot(df, args.plot, version_info)
+    if args.out:
+        df.to_csv(args.out, index=False)
+        print(f"\nResults saved to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
