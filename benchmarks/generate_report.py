@@ -2,10 +2,10 @@
 """Generate combined benchmarks README.md from CSV results.
 
 Usage:
-    python benchmarks/generate_readme.py
-    python benchmarks/generate_readme.py --logistic-results path/to/logistic.csv
-    python benchmarks/generate_readme.py --cox-results path/to/cox.csv
-    python benchmarks/generate_readme.py -o path/to/output.md
+    python benchmarks/generate_report.py
+    python benchmarks/generate_report.py --logistic-results path/to/logistic.csv
+    python benchmarks/generate_report.py --cox-results path/to/cox.csv
+    python benchmarks/generate_report.py -o path/to/output.md
 """
 
 import argparse
@@ -21,11 +21,6 @@ import pandas as pd
 # Paths
 # -----------------------------------------------------------------------------
 BENCHMARKS_DIR = Path(__file__).parent
-LOGISTIC_CSV = BENCHMARKS_DIR / "logistic_results.csv"
-COX_CSV = BENCHMARKS_DIR / "cox_results.csv"
-LOGISTIC_PLOT = BENCHMARKS_DIR / "logistic_report.png"
-COX_PLOT = BENCHMARKS_DIR / "cox_report.png"
-README_PATH = BENCHMARKS_DIR / "README.md"
 
 # Benchmark parameters (must match the individual benchmark scripts)
 LOGISTIC_N_SAMPLES = 1000
@@ -444,7 +439,7 @@ All implementations agree within chosen tolerance (coefficients {LOGISTIC_COEF_T
 
 ### Results
 
-![Logistic benchmark scaling plot](logistic_report.png)
+![Logistic benchmark scaling plot](logistic_results.png)
 
 #### Fit Only
 
@@ -522,7 +517,7 @@ All implementations agree within chosen tolerance (coefficients {COX_COEF_TOL}, 
 
 ### Results
 
-![Cox benchmark scaling plot](cox_report.png)
+![Cox benchmark scaling plot](cox_results.png)
 
 #### Fit Only
 
@@ -560,7 +555,7 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
     return section
 
 
-def generate_readme(
+def generate_report(
     logistic_df: pd.DataFrame,
     cox_df: pd.DataFrame,
     version_info: dict[str, str],
@@ -612,7 +607,7 @@ python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.csv
 python benchmarks/benchmark_cox.py -o benchmarks/cox_results.csv
 
 # Generate plots and README
-python benchmarks/generate_readme.py
+python benchmarks/generate_report.py
 ```
 """
 
@@ -647,6 +642,10 @@ def main():
     logistic_csv = Path(args.logistic_results)
     cox_csv = Path(args.cox_results)
 
+    # Derive plot paths from CSV paths (same name, .png extension)
+    logistic_plot = logistic_csv.with_suffix(".png")
+    cox_plot = cox_csv.with_suffix(".png")
+
     # Check that CSV files exist
     if not logistic_csv.exists():
         print(f"Error: {logistic_csv} not found", file=sys.stderr)
@@ -670,12 +669,12 @@ def main():
 
     # Generate plots
     print("Generating plots...", file=sys.stderr)
-    save_logistic_plot(logistic_df, str(LOGISTIC_PLOT), version_info)
-    save_cox_plot(cox_df, str(COX_PLOT), version_info)
+    save_logistic_plot(logistic_df, str(logistic_plot), version_info)
+    save_cox_plot(cox_df, str(cox_plot), version_info)
 
     # Generate README
     print("Generating README...", file=sys.stderr)
-    readme_content = generate_readme(logistic_df, cox_df, version_info)
+    readme_content = generate_report(logistic_df, cox_df, version_info)
 
     # Write output
     with open(args.out, "w") as f:
