@@ -366,8 +366,8 @@ def get_python_version_info() -> dict[str, str]:
         if blas_info.get("found"):
             lib_dir = blas_info.get("lib directory", "")
             name = blas_info.get("name", "unknown")
-            version = blas_info.get("version", "")
-            info["numpy_blas"] = f"{lib_dir} ({name} {version})".strip()
+            blas_version = blas_info.get("version", "")
+            info["numpy_blas"] = f"{lib_dir} ({name} {blas_version})".strip()
         else:
             info["numpy_blas"] = "unknown"
     except Exception:
