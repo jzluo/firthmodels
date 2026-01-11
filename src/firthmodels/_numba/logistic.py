@@ -611,7 +611,7 @@ def profile_ci_bound_logistic(
 
         info = dgetrf(G, ipiv)
         if info == 0:
-            # Solve G * [v, g_j] = [F, e_idx] without forming G^-1.
+            # Solve G @ [v, g_j] = [F, e_idx] without forming G^-1.
             for i in range(k):
                 rhs[i, 0] = F[i]
                 rhs[i, 1] = 0.0
