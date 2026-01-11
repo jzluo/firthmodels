@@ -155,9 +155,11 @@ def profile_ci_bound(
             try:
                 e_idx_vec = np.zeros(k, dtype=np.float64)
                 e_idx_vec[idx] = 1.0
-                g_j = cast(NDArray[np.float64], np.linalg.lstsq(G, e_idx_vec, rcond=None)[0])
+                g_j = cast(
+                    NDArray[np.float64], np.linalg.lstsq(G, e_idx_vec, rcond=None)[0]
+                )
             except np.linalg.LinAlgError:
-                # pinv failed (SVD did not converge); take damped step (pg 92)
+                # take damped step (pg 92)
                 theta = theta - 0.1 * v
                 continue
 
