@@ -5,7 +5,7 @@ from typing import Callable, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.linalg.lapack import dgetrf, dgetri
+from scipy.linalg.lapack import dgetrf, dgetrs
 
 from firthmodels._utils import IterationQuantities
 
@@ -137,27 +137,34 @@ def profile_ci_bound(
         G[idx, :] = q.modified_score  # Jacobian (Eq. 3)
 
         # Appendix step 6: v = G^-1 F (direction to subtract)
+        # Solve G @ [v, g_j] = [F, e_idx] without forming G^-1.
         try:
-            # G_inv = np.linalg.inv(G)
             lu, piv, info = dgetrf(G, overwrite_a=0)
             if info != 0:
                 raise np.linalg.LinAlgError("dgetrf failed")
-            G_inv, info = dgetri(lu, piv, overwrite_lu=1)
+            rhs = np.zeros((k, 2), dtype=np.float64, order="F")
+            rhs[:, 0] = F
+            rhs[idx, 1] = 1.0  # e_idx
+            sol, info = dgetrs(lu, piv, rhs)
             if info != 0:
-                raise np.linalg.LinAlgError("dgetri failed")
-            v = G_inv @ F
+                raise np.linalg.LinAlgError("dgetrs failed")
+            v = sol[:, 0]
+            g_j = sol[:, 1]
         except np.linalg.LinAlgError:
             v = cast(NDArray[np.float64], np.linalg.lstsq(G, F, rcond=None)[0])
             try:
-                G_inv = np.linalg.pinv(G)
+                e_idx_vec = np.zeros(k, dtype=np.float64)
+                e_idx_vec[idx] = 1.0
+                g_j = cast(
+                    NDArray[np.float64], np.linalg.lstsq(G, e_idx_vec, rcond=None)[0]
+                )
             except np.linalg.LinAlgError:
-                # pinv failed (SVD did not converge); take damped step (pg 92)
+                # take damped step (pg 92)
                 theta = theta - 0.1 * v
                 continue
 
         # Appendix step 7: quadratic correction
         # g'Dg*s^2 + (2v'Dg - 2)*s + v'Dv = 0 (Eq. 8)
-        g_j = G_inv[:, idx]
         a = g_j @ D @ g_j
         b = 2 * v @ D @ g_j - 2
         c = v @ D @ v
