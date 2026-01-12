@@ -344,6 +344,7 @@ def constrained_lrt_1df_logistic(
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
     idx: int,
+    beta_init_free: NDArray[np.float64],
     max_iter: int,
     max_step: float,
     max_halfstep: int,
@@ -389,6 +390,10 @@ def constrained_lrt_1df_logistic(
         if j != idx:
             free_idx[pos] = j
             pos += 1
+
+    for i in range(free_k):
+        beta[free_idx[i]] = beta_init_free[i]
+    beta[idx] = 0.0
 
     loglik, status = compute_logistic_quantities(
         X, y, beta, sample_weight, offset, workspace

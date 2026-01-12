@@ -314,6 +314,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.converged_ = result.converged
 
         # === Wald ===
+        self._cov = None
         if not np.all(np.isfinite(result.fisher_info)):
             warnings.warn(
                 "Fisher information matrix is not finite; "
@@ -426,13 +427,33 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         else:
             beta_hat_full = self.coef_
 
+        k = beta_hat_full.shape[0]
+        free_idx = np.array([i for i in range(k) if i != idx], dtype=np.intp)
+        beta_free = beta_hat_full[free_idx]
+        beta_j = beta_hat_full[idx]
+        beta_init_free = None
+
+        # Warm start for constrained LRT (beta_j=0) using cov from the full fit
+        # (Schur complement)
+        if self._cov is not None:
+            denom = self._cov[idx, idx]
+            if np.isfinite(denom) and denom > 0.0:
+                col = self._cov[free_idx, idx]
+                if np.all(np.isfinite(col)):
+                    beta_init_free = beta_free - beta_j * (col / denom)
+
         if self._resolve_backend() == "numba":
+            if beta_init_free is None:
+                beta_init_free_numba = np.zeros(k - 1, dtype=np.float64)
+            else:
+                beta_init_free_numba = beta_init_free
             loglik_constrained, n_iter, status = constrained_lrt_1df_logistic(
                 X=X,
                 y=y,
                 sample_weight=sample_weight,
                 offset=offset,
                 idx=idx,
+                beta_init_free=beta_init_free_numba,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
@@ -482,6 +503,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 beta_hat_full=beta_hat_full,
                 loglik_full=self.loglik_,
                 compute_quantities_full=compute_quantities_full,
+                beta_init_free=beta_init_free,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
