@@ -181,8 +181,8 @@ class TestFirthCoxPH:
             called["dpstrf"] += 1
             return orig_dpstrf(*args, **kwargs)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("force failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.cox.dpotrf", fake_dpotrf)
         monkeypatch.setattr("firthmodels.cox.dpstrf", wrapped_dpstrf)
@@ -199,8 +199,8 @@ class TestFirthCoxPH:
         event = rng.choice([True, False], size=8)
         y = _structured_y(event, time)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("force failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.cox.dpotrf", fake_dpotrf)
 

@@ -218,11 +218,32 @@ class FirthCoxPH(BaseEstimator):
         self.n_iter_ = result.n_iter
 
         # Wald
-        try:
-            cov = np.linalg.inv(result.fisher_info)
-            self.bse_ = np.sqrt(np.diag(cov))
-        except np.linalg.LinAlgError:
+        self._cov = None
+        if not np.all(np.isfinite(result.fisher_info)):
+            warnings.warn(
+                "Fisher information matrix is not finite; "
+                "standard errors and p-values cannot be computed.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             self.bse_ = np.full(precomputed.n_features, np.nan)
+        else:
+            L, info = dpotrf(result.fisher_info, lower=1, overwrite_a=0)
+            if info == 0:
+                k = result.fisher_info.shape[0]
+                eye_k = np.eye(k, dtype=np.float64, order="F")
+                inv_fisher_info, info = dpotrs(L, eye_k, lower=1)
+                if info == 0:
+                    self._cov = inv_fisher_info
+                    self.bse_ = np.sqrt(self._cov.diagonal())
+            if info != 0:
+                warnings.warn(
+                    "Fisher information is not positive definite; "
+                    "standard errors and p-values cannot be computed.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self.bse_ = np.full(precomputed.n_features, np.nan)
 
         z = result.beta / self.bse_
         self.pvalues_ = 2 * scipy.stats.norm.sf(np.abs(z))
@@ -298,14 +319,35 @@ class FirthCoxPH(BaseEstimator):
         idx : int
             Index of the coefficient to test.
         """
+        beta_hat_full = self.coef_
+
+        k = beta_hat_full.shape[0]
+        free_idx = np.array([i for i in range(k) if i != idx], dtype=np.intp)
+        beta_free = beta_hat_full[free_idx]
+        beta_j = beta_hat_full[idx]
+        beta_init_free = None
+
+        # Warm start for constrained LRT (beta_j=0) using cov from the full fit
+        # (Schur complement).
+        if self._cov is not None:
+            denom = self._cov[idx, idx]
+            if np.isfinite(denom) and denom > 0.0:
+                col = self._cov[free_idx, idx]
+                if np.all(np.isfinite(col)):
+                    beta_init_free = beta_free - beta_j * (col / denom)
 
         if self._resolve_backend() == "numba":
+            if beta_init_free is None:
+                beta_init_free_numba = np.zeros(k - 1, dtype=np.float64)
+            else:
+                beta_init_free_numba = beta_init_free
             constrained_loglik, n_iter, status = constrained_lrt_1df_cox(
                 X=self._precomputed.X,
                 block_ends=self._precomputed.block_ends,
                 block_d=self._precomputed.block_d,
                 block_s=self._precomputed.block_s,
                 idx=idx,
+                beta_init_free=beta_init_free_numba,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
@@ -347,13 +389,12 @@ class FirthCoxPH(BaseEstimator):
                     beta=beta, precomputed=self._precomputed, workspace=self._workspace
                 )
 
-            beta_hat_full = self.coef_
-
             result = constrained_lrt_1df(
                 idx=idx,
                 beta_hat_full=beta_hat_full,
                 loglik_full=self.loglik_,
                 compute_quantities_full=compute_quantities_full,
+                beta_init_free=beta_init_free,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
