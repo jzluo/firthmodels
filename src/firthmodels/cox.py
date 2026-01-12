@@ -269,6 +269,7 @@ class FirthCoxPH(BaseEstimator):
     def lrt(
         self,
         features: int | str | Sequence[int | str] | None = None,
+        warm_start: bool = True,
     ) -> Self:
         """
         Compute penalized likelihood ratio test p-values.
@@ -284,6 +285,9 @@ class FirthCoxPH(BaseEstimator):
             - str: single feature by name (requires `feature_names_in`)
             - Sequence[int]: multiple features by index
             - Sequence[str]: multiple features by name
+        warm_start : bool, default=True
+            If True, warm-start constrained fits using the covariance from the full
+            model (when available).
 
         Returns
         -------
@@ -295,7 +299,7 @@ class FirthCoxPH(BaseEstimator):
         # compute LRT
         for idx in indices:
             if np.isnan(self.lrt_pvalues_[idx]):
-                self._compute_single_lrt(idx)
+                self._compute_single_lrt(idx, warm_start=warm_start)
         return self
 
     def _resolve_feature_indices(
@@ -309,7 +313,7 @@ class FirthCoxPH(BaseEstimator):
             feature_names_in=getattr(self, "feature_names_in_", None),
         )
 
-    def _compute_single_lrt(self, idx: int) -> None:
+    def _compute_single_lrt(self, idx: int, *, warm_start: bool = True) -> None:
         """
         Fit constrained model with `beta[idx]=0` and compute LRT p-value and
         back-corrected standard error.
@@ -318,6 +322,9 @@ class FirthCoxPH(BaseEstimator):
         ----------
         idx : int
             Index of the coefficient to test.
+        warm_start : bool, default=True
+            If True, warm-start constrained fits using the covariance from the full
+            model (when available).
         """
         beta_hat_full = self.coef_
 
@@ -329,7 +336,7 @@ class FirthCoxPH(BaseEstimator):
 
         # Warm start for constrained LRT (beta_j=0) using cov from the full fit
         # (Schur complement).
-        if self._cov is not None:
+        if warm_start and self._cov is not None:
             denom = self._cov[idx, idx]
             if np.isfinite(denom) and denom > 0.0:
                 col = self._cov[free_idx, idx]

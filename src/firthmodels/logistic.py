@@ -366,6 +366,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
     def lrt(
         self,
         features: int | str | Sequence[int | str] | None = None,
+        warm_start: bool = True,
     ) -> Self:
         """
         Compute penalized likelihood ratio test p-values.
@@ -382,6 +383,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             - Sequence[int]: multiple features by index
             - Sequence[str]: multiple features by name
             - None: all features (including intercept if `fit_intercept=True`)
+        warm_start : bool, default=True
+            If True, warm-start constrained fits using the covariance from the full
+            model (when available).
 
         Returns
         -------
@@ -407,10 +411,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         # compute LRT
         for idx in indices:
             if np.isnan(self.lrt_pvalues_[idx]):
-                self._compute_single_lrt(idx)
+                self._compute_single_lrt(idx, warm_start=warm_start)
         return self
 
-    def _compute_single_lrt(self, idx: int) -> None:
+    def _compute_single_lrt(self, idx: int, *, warm_start: bool = True) -> None:
         """
         Fit constrained model with `beta[idx]=0` and compute LRT p-value and
         back-corrected standard error.
@@ -419,6 +423,9 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         ----------
         idx : int
             Index of the coefficient to test. Use len(coef_) for the intercept.
+        warm_start : bool, default=True
+            If True, warm-start constrained fits using the covariance from the full
+            model (when available).
         """
         X, y, sample_weight, offset = self._fit_data
 
@@ -435,7 +442,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         # Warm start for constrained LRT (beta_j=0) using cov from the full fit
         # (Schur complement)
-        if self._cov is not None:
+        if warm_start and self._cov is not None:
             denom = self._cov[idx, idx]
             if np.isfinite(denom) and denom > 0.0:
                 col = self._cov[free_idx, idx]
