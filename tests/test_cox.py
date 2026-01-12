@@ -166,6 +166,42 @@ class TestFirthCoxPH:
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
 
+    def test_lrt_warm_start_matches(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+
+        model_warm = FirthCoxPH(backend="numpy").fit(X, y)
+        model_warm.lrt(warm_start=True)
+
+        model_cold = FirthCoxPH(backend="numpy").fit(X, y)
+        model_cold.lrt(warm_start=False)
+
+        np.testing.assert_allclose(
+            model_cold.lrt_pvalues_, model_warm.lrt_pvalues_, rtol=1e-6
+        )
+        np.testing.assert_allclose(model_cold.lrt_bse_, model_warm.lrt_bse_, rtol=1e-6)
+
+    def test_lrt_warm_start_false_uses_zero_init(
+        self, cox_separation_data, monkeypatch
+    ):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+        captured = {}
+
+        def fake_constrained_lrt_1df(*, beta_init_free, **kwargs):
+            captured["beta_init_free"] = beta_init_free
+            return firthmodels.cox.LRTResult(
+                chi2=0.0, pvalue=1.0, bse_backcorrected=1.0
+            )
+
+        monkeypatch.setattr(
+            "firthmodels.cox.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        model.lrt(0, warm_start=False)
+        assert captured["beta_init_free"] is None
+
     def test_dpstrf_fallback_in_compute_cox_quantities(
         self, cox_separation_data, monkeypatch
     ):
