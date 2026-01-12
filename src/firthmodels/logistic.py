@@ -323,10 +323,21 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             )
             bse = np.full_like(result.beta, np.nan)
         else:
-            try:
-                cov = np.linalg.inv(result.fisher_info)
-                bse = np.sqrt(np.diag(cov))
-            except np.linalg.LinAlgError:
+            L, info = dpotrf(result.fisher_info, lower=1, overwrite_a=0)
+            if info == 0:
+                k = result.fisher_info.shape[0]
+                eye_k = np.eye(k, dtype=np.float64, order="F")
+                inv_fisher_info, info = dpotrs(L, eye_k, lower=1)
+                if info == 0:
+                    self._cov = inv_fisher_info
+                    bse = np.sqrt(self._cov.diagonal())
+            if info != 0:
+                warnings.warn(
+                    "Fisher information is not positive definite; "
+                    "standard errors and p-values cannot be computed.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 bse = np.full_like(result.beta, np.nan)
 
         z = result.beta / bse

@@ -192,8 +192,8 @@ class TestFirthLogisticRegression:
             called["dorgqr"] += 1
             return orig_dorgqr(*args, **kwargs)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
         monkeypatch.setattr("firthmodels.logistic.dgeqp3", wrapped_dgeqp3)
@@ -220,8 +220,8 @@ class TestFirthLogisticRegression:
         sample_weight = np.ones(X.shape[0])
         offset = np.zeros(X.shape[0])
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
 
@@ -243,8 +243,8 @@ class TestFirthLogisticRegression:
         X, y = separation_data
         model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels._solvers.dpotrf", fake_dpotrf)
         model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
