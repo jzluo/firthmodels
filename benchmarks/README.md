@@ -27,7 +27,7 @@ for Firth-penalized logistic regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.3.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.4.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **brglm2** | 1.0.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 | **logistf** | 1.26.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
@@ -57,15 +57,15 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
 |--:|------:|------:|------------:|-------------:|--------:|
 |   5 | 0.5 | 1.3 | 4.2 | 4.2 | 2.0 |
-|  10 | 1.1 | 1.6 | 7.9 | 7.2 | 4.3 |
-|  15 | 1.2 | 1.8 | 8.2 | 8.2 | 7.6 |
-|  20 | 1.4 | 2.0 | 9.3 | 9.4 | 15.7 |
+|  10 | 1.1 | 1.2 | 7.9 | 7.2 | 4.3 |
+|  15 | 1.2 | 1.9 | 8.2 | 8.2 | 7.6 |
+|  20 | 1.4 | 2.1 | 9.3 | 9.4 | 15.7 |
 |  25 | 1.7 | 2.5 | 11.7 | 11.7 | 24.2 |
-|  30 | 1.9 | 2.7 | 12.6 | 12.9 | 30.2 |
+|  30 | 2.0 | 2.7 | 12.6 | 12.9 | 30.2 |
 |  35 | 2.1 | 3.0 | 14.9 | 14.8 | 42.0 |
-|  40 | 2.6 | 3.5 | 16.9 | 16.8 | 52.7 |
+|  40 | 2.8 | 3.5 | 16.9 | 16.8 | 52.7 |
 |  45 | 3.3 | 4.4 | 18.6 | 19.8 | 70.3 |
-|  50 | 4.1 | 6.1 | 23.9 | 24.2 | 86.0 |
+|  50 | 4.1 | 5.4 | 23.9 | 24.2 | 86.0 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -73,16 +73,16 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
 |--:|------:|------:|--------:|
-|   5 | 5.1 | 11.5 | 13.6 |
-|  10 | 23.1 | 44.0 | 72.1 |
-|  15 | 33.6 | 68.1 | 157.6 |
-|  20 | 54.2 | 98.9 | 452.6 |
-|  25 | 91.4 | 158.9 | 931.5 |
-|  30 | 127.3 | 201.6 | 1350.4 |
-|  35 | 165.2 | 270.5 | 2322.4 |
-|  40 | 235.8 | 363.8 | 3334.4 |
-|  45 | 322.2 | 496.3 | 4692.8 |
-|  50 | 452.2 | 646.9 | 6501.0 |
+|   5 | 4.7 | 10.2 | 13.6 |
+|  10 | 20.5 | 41.2 | 72.1 |
+|  15 | 31.2 | 65.3 | 157.6 |
+|  20 | 49.6 | 90.3 | 452.6 |
+|  25 | 82.2 | 140.8 | 931.5 |
+|  30 | 117.2 | 184.5 | 1350.4 |
+|  35 | 147.6 | 240.9 | 2322.4 |
+|  40 | 211.8 | 316.5 | 3334.4 |
+|  45 | 279.8 | 413.6 | 4692.8 |
+|  50 | 393.2 | 538.8 | 6501.0 |
 
 
 ---
@@ -97,7 +97,7 @@ for Firth-penalized Cox proportional hazards regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.3.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.4.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **coxphf** | 1.13.4 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
 ### Configuration
@@ -124,12 +124,12 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 2.8 | 4.3 | 3.5 |
-|  10 | 1.7 | 5.3 | 22.2 |
-|  15 | 2.1 | 6.9 | 49.9 |
-|  20 | 4.3 | 13.5 | 113.9 |
-|  25 | 5.2 | 32.9 | 225.5 |
-|  30 | 7.3 | 55.6 | 391.0 |
+|   5 | 2.9 | 4.2 | 3.5 |
+|  10 | 1.7 | 5.2 | 22.2 |
+|  15 | 2.1 | 6.7 | 49.9 |
+|  20 | 4.0 | 13.5 | 113.9 |
+|  25 | 5.2 | 20.3 | 225.5 |
+|  30 | 7.5 | 53.0 | 391.0 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -137,12 +137,12 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 4.4 | 19.9 | 23.8 |
-|  10 | 12.9 | 66.0 | 364.4 |
-|  15 | 36.3 | 177.5 | 1693.6 |
-|  20 | 114.2 | 504.9 | 5675.5 |
-|  25 | 189.4 | 2121.2 | 16062.0 |
-|  30 | 297.1 | 3870.1 | 34707.3 |
+|   5 | 4.3 | 17.6 | 23.8 |
+|  10 | 11.6 | 56.3 | 364.4 |
+|  15 | 31.7 | 153.3 | 1693.6 |
+|  20 | 98.2 | 438.4 | 5675.5 |
+|  25 | 164.7 | 791.2 | 16062.0 |
+|  30 | 257.2 | 3131.3 | 34707.3 |
 
 
 ---
