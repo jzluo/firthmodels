@@ -157,14 +157,15 @@ model.lrt_bse_         # Back-corrected standard errors (separate from Wald bse_
 ```
 
 Each feature requires a separate constrained model fit, so you can test selectively to
-avoid unnecessary computation:
+avoid unnecessary computation. By default, LRT uses a warm start based on the full-model
+covariance to reduce Newton-Raphson iterations; pass `warm_start=False` to disable it.
 
 ```python
 model.lrt(0)              # Single feature by index
 model.lrt([0, 2])         # Multiple features
 model.lrt(['snp', 'age']) # By name (if fitted with DataFrame)
 model.lrt(['snp', 2])     # Mixed
-
+model.lrt(warm_start=False)  # Disable warm start
 ```
 
 ### Confidence intervals
