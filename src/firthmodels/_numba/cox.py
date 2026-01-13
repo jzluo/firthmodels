@@ -617,6 +617,7 @@ def constrained_lrt_1df_cox(
     block_d: NDArray[np.int64],
     block_s: NDArray[np.float64],
     idx: int,
+    beta_init_free: NDArray[np.float64],
     max_iter: int,
     max_step: float,
     max_halfstep: int,
@@ -661,6 +662,10 @@ def constrained_lrt_1df_cox(
         if j != idx:
             free_idx[pos] = j
             pos += 1
+
+    for i in range(free_k):
+        beta[free_idx[i]] = beta_init_free[i]
+    beta[idx] = 0.0
 
     fisher_free = _alloc_f_order(free_k, free_k)
     score_free = np.empty(free_k, dtype=np.float64)

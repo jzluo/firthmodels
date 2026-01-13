@@ -30,6 +30,7 @@ def constrained_lrt_1df(
     beta_hat_full: NDArray[np.float64],
     loglik_full: float,
     compute_quantities_full: Callable[[NDArray[np.float64]], IterationQuantities],
+    beta_init_free: NDArray[np.float64] | None = None,
     max_iter: int,
     max_step: float,
     max_halfstep: int,
@@ -55,6 +56,8 @@ def constrained_lrt_1df(
     compute_quantities_full : callable
         Function that takes a beta vector of shape (k,) and returns loglik,
         modified_score, and fisher_info for the full model.
+    beta_init_free : ndarray of shape (k-1,), optional
+        Optional warm-start coefficients for the reduced parameter vector.
     max_iter : int
         Maximum Newton-Raphson iterations for constrained fit.
     max_step : float
@@ -105,6 +108,7 @@ def constrained_lrt_1df(
         max_halfstep=max_halfstep,
         gtol=gtol,
         xtol=xtol,
+        beta_init=beta_init_free,
     )
 
     chi2 = max(0.0, 2.0 * (loglik_full - reduced_result.loglik))

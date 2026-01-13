@@ -18,6 +18,7 @@ def newton_raphson(
     max_halfstep: int,
     gtol: float,
     xtol: float,
+    beta_init: NDArray[np.float64] | None = None,
 ) -> FirthResult:
     """
     Newton-Raphson solver
@@ -38,13 +39,22 @@ def newton_raphson(
         Gradient convergence criteria. Converged when max|gradient| < gtol.
     xtol : float
         Parameter convergence criteria. Converged when max|delta| < xtol.
+    beta_init : ndarray of shape (n_features,), optional
+        Optional starting coefficients. Defaults to zeros.
 
     Returns
     -------
     FirthResult
         Result of Firth-penalized optimization
     """
-    beta = np.zeros(n_features, dtype=np.float64)
+    if beta_init is None:
+        beta = np.zeros(n_features, dtype=np.float64)
+    else:
+        if beta_init.shape[0] != n_features:
+            raise ValueError(
+                f"beta_init must have shape ({n_features},), got {beta_init.shape}."
+            )
+        beta = beta_init.astype(np.float64, copy=True)
     q = compute_quantities(beta)
 
     for iteration in range(1, max_iter + 1):

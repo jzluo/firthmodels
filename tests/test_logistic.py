@@ -117,6 +117,37 @@ class TestFirthLogisticRegression:
         assert np.isnan(model.lrt_pvalues_[2])
         assert not np.isnan(model.lrt_pvalues_[3])
 
+    def test_lrt_warm_start_matches(self, separation_data):
+        X, y = separation_data
+        model_warm = FirthLogisticRegression(backend="numpy").fit(X, y)
+        model_warm.lrt(warm_start=True)
+
+        model_cold = FirthLogisticRegression(backend="numpy").fit(X, y)
+        model_cold.lrt(warm_start=False)
+
+        np.testing.assert_allclose(
+            model_cold.lrt_pvalues_, model_warm.lrt_pvalues_, rtol=1e-6
+        )
+        np.testing.assert_allclose(model_cold.lrt_bse_, model_warm.lrt_bse_, rtol=1e-6)
+
+    def test_lrt_warm_start_false_uses_zero_init(self, separation_data, monkeypatch):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+        captured = {}
+
+        def fake_constrained_lrt_1df(*, beta_init_free, **kwargs):
+            captured["beta_init_free"] = beta_init_free
+            return firthmodels.logistic.LRTResult(
+                chi2=0.0, pvalue=1.0, bse_backcorrected=1.0
+            )
+
+        monkeypatch.setattr(
+            "firthmodels.logistic.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        model.lrt(0, warm_start=False)
+        assert captured["beta_init_free"] is None
+
     def test_no_warning_when_halfstep_disabled(self):
         """max_halfstep=0 should not produce step-halving warnings."""
         X = np.array([[0], [0], [0], [1], [1], [1]], dtype=float)
@@ -192,8 +223,8 @@ class TestFirthLogisticRegression:
             called["dorgqr"] += 1
             return orig_dorgqr(*args, **kwargs)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
         monkeypatch.setattr("firthmodels.logistic.dgeqp3", wrapped_dgeqp3)
@@ -220,8 +251,8 @@ class TestFirthLogisticRegression:
         sample_weight = np.ones(X.shape[0])
         offset = np.zeros(X.shape[0])
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels.logistic.dpotrf", fake_dpotrf)
 
@@ -243,8 +274,8 @@ class TestFirthLogisticRegression:
         X, y = separation_data
         model_normal = FirthLogisticRegression(backend="numpy").fit(X, y)
 
-        def fake_dpotrf(*args, **kwargs):
-            raise scipy.linalg.LinAlgError("forced failure")
+        def fake_dpotrf(a, *args, **kwargs):
+            return (a, 1)
 
         monkeypatch.setattr("firthmodels._solvers.dpotrf", fake_dpotrf)
         model_fallback = FirthLogisticRegression(backend="numpy").fit(X, y)
