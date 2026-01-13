@@ -50,6 +50,8 @@ Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.
 
 Optional dependencies:
 - Numba acceleration: `pip install firthmodels[numba]`
+  - The first run with the Numba backend after installing or updating firthmodels may take 10-30 seconds due to JIT compilation. Subsequent runs are fast thanks to caching.
+
 - Formula interface for the statsmodels adapter: `pip install firthmodels[formula]`
 (or simply install [formulaic](https://matthewwardrop.github.io/formulaic/latest/)).
 
