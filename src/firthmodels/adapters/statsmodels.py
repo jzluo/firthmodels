@@ -510,7 +510,11 @@ class FirthLogitResults:
         The diagonal elements are the squared Wald standard errors, i.e.,
         `sqrt(diag(cov_params()))` equals `self.bse`.
         """
-        return self.estimator._cov
+        cov = self.estimator._cov
+        if cov is None:
+            k = len(self.params)
+            return np.full((k, k), np.nan)
+        return cov
 
     def summary(self, alpha: float = 0.05) -> "FirthSummary":
         """
