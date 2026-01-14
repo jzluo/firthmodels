@@ -17,10 +17,10 @@ class TestDetectSeparation:
         )  # X1=+Inf, intercept=-Inf
         np.testing.assert_array_equal(result.is_finite, [False, False])
 
-        # summary() uses x0, x1, ... when feature names not available
+        # summary() uses x0, x1, ... for features, but "intercept" for intercept
         summary = result.summary()
         assert "x0" in summary
-        assert "x1" in summary
+        assert "intercept" in summary
 
     def test_overlap_no_separation(self):
         X = np.array([[1], [1], [2], [2], [3], [3]], dtype=float)

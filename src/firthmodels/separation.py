@@ -40,8 +40,9 @@ class SeparationResult:
     directions : ndarray of shape (n_features,)
         Direction of infinite coefficients: +1 for +inf, -1 for -inf, 0 for finite.
     feature_names : tuple of str or None
-        Names of coefficients (including intercept if present). Populated
-        automatically when X is a pandas DataFrame, otherwise None.
+        Names of coefficients (including intercept if present) from dataframe column
+        names, or auto-generated (x0, x1, ...) if `fit_intercept=True`. `None` if `X`
+        is a NumPy array and `fit_intercept=False`.
     """
 
     separation: bool
@@ -211,6 +212,8 @@ def detect_separation(
         X_arr = np.column_stack([X_arr, np.ones(n_samples)])
         if feature_names is not None:
             feature_names = feature_names + ("intercept",)
+        else:
+            feature_names = tuple(f"x{i}" for i in range(n_features)) + ("intercept",)
 
     n_params = X_arr.shape[1]
 
