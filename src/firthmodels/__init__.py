@@ -7,8 +7,11 @@ except ImportError:
 
 from firthmodels.cox import FirthCoxPH
 from firthmodels.logistic import FirthLogisticRegression
+from firthmodels.separation import SeparationResult, detect_separation
 
 __all__ = [
     "FirthCoxPH",
     "FirthLogisticRegression",
+    "SeparationResult",
+    "detect_separation",
 ]
