@@ -205,7 +205,7 @@ def detect_separation(
         raise ValueError(f"y must be binary, got {len(unique_y)} unique values")
 
     # Map to 0/1 if needed
-    if not (np.array_equal(unique_y, [0, 1]) or np.array_equal(unique_y, [0.0, 1.0])):
+    if not (unique_y[0] == 0 and unique_y[1] == 1):
         y_arr = (y_arr == unique_y[1]).astype(np.float64)
 
     if fit_intercept:
