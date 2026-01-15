@@ -188,6 +188,7 @@ class FirthCoxPH(BaseEstimator):
                 gtol=self.gtol,
                 xtol=self.xtol,
                 workspace=workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
             )
 
             if status == _STATUS_STEP_HALVING_FAILED:
@@ -389,6 +390,7 @@ class FirthCoxPH(BaseEstimator):
                 gtol=self.gtol,
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
             )
 
             if status == _STATUS_STEP_HALVING_FAILED:
@@ -581,6 +583,7 @@ class FirthCoxPH(BaseEstimator):
                                 tol=tol,
                                 D0=D0,
                                 workspace=self._workspace.numba_buffers(),
+                                penalty_weight=self.penalty_weight,
                             )
 
                             result = ProfileCIBoundResult(
