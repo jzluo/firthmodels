@@ -266,6 +266,7 @@ res = FirthLogit.from_formula("y ~ age + treatment", df).fit()
 | `xtol` | `1e-4` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
 | `max_step` | `5.0` | Maximum step size per coefficient |
 | `max_halfstep` | `25` | Maximum step-halvings per iteration |
+| `penalty_weight` | `0.5` | Weight of the Firth penalty term. The default 0.5 corresponds to the standard Firth bias reduction method (Firth, 1993), equivalent to using Jeffreys' invariant prior. Set to `0.0` for unpenalized maximum likelihood estimation. |
 
 ### `FirthLogisticRegression` attributes (after fitting)
 
@@ -295,6 +296,7 @@ res = FirthLogit.from_formula("y ~ age + treatment", df).fit()
 | `xtol` | `1e-6` | Parameter convergence tolerance (converged when max\|delta\| < xtol) |
 | `max_step` | `5.0` | Maximum step size per coefficient |
 | `max_halfstep` | `5` | Maximum step-halvings per iteration |
+| `penalty_weight` | `0.5` | Weight of the Firth penalty term. The default 0.5 corresponds to the standard Firth bias reduction method (Heinze and Schemper, 2001), equivalent to using Jeffreys' invariant prior. Set to `0.0` for unpenalized Cox partial likelihood estimation. |
 
 ### `FirthCoxPH` attributes (after fitting)
 
