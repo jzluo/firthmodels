@@ -59,6 +59,11 @@ class TestFirthLogit:
         results = FirthLogit(y, X).fit()
         assert isinstance(results, FirthLogitResults)
 
+    def test_fit_passes_penalty_weight(self, toy_data):
+        X, y = toy_data
+        results = FirthLogit(y, X, penalty_weight=0.0).fit()
+        assert results.estimator.penalty_weight == 0.0
+
 
 class TestFirthLogitResults:
     @pytest.fixture
