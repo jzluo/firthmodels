@@ -251,6 +251,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 sample_weight=sample_weight,
                 offset=offset,
                 workspace=workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
@@ -474,6 +475,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 gtol=self.gtol,
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
             )
             if status == _STATUS_STEP_HALVING_FAILED:
                 warnings.warn(
@@ -649,6 +651,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                                 tol=tol,
                                 D0=D0,
                                 workspace=self._workspace.numba_buffers(),
+                                penalty_weight=self.penalty_weight,
                             )
                             if status == _STATUS_RANK_DEFICIENT:
                                 raise scipy.linalg.LinAlgError(

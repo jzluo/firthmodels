@@ -70,6 +70,7 @@ def compute_logistic_quantities(
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int]:  # loglik, status
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     (
@@ -118,6 +119,25 @@ def compute_logistic_quantities(
     # dpotrf overwrites fisher_info with lower Cholesky factor
     # compute logdet using L diagonal (in fisher_info)
     dsyrk(XtW, fisher_info)
+    if penalty_weight == 0.0:  # unpenalized fast-path
+        # the solver expects fisher_info_aug to contain the "current" Fisher info matrix
+        # so copy fisher_info into fisher_info_aug for penalty_weight=0
+        for i in range(k):
+            for j in range(i + 1):
+                fisher_info_aug[i, j] = fisher_info[i, j]
+        symmetrize_lower(fisher_info_aug)
+
+        loglik = 0.0
+        for i in range(n):
+            loglik += sample_weight[i] * (y[i] * eta[i] - log1pexp(eta[i]))
+
+        for i in range(n):
+            residual[i] = sample_weight[i] * (y[i] - p[i])
+
+        dgemv(X.T, residual, modified_score)
+
+        return loglik, 0
+
     info = dpotrf(fisher_info)
     if info == 0:
         logdet = 0.0
@@ -186,8 +206,10 @@ def compute_logistic_quantities(
                 total += XW[i, j] * XW[i, j]
             h[i] = total
 
+    penalty_scale = 2.0 * penalty_weight
+
     for i in range(n):
-        w_aug_i = (sample_weight[i] + h[i]) * p[i] * (1.0 - p[i])
+        w_aug_i = (sample_weight[i] + penalty_scale * h[i]) * p[i] * (1.0 - p[i])
         w_aug[i] = w_aug_i
         sqrt_w_aug[i] = np.sqrt(w_aug_i)
 
@@ -202,10 +224,12 @@ def compute_logistic_quantities(
     loglik = 0.0
     for i in range(n):
         loglik += sample_weight[i] * (y[i] * eta[i] - log1pexp(eta[i]))
-    loglik += 0.5 * logdet
+    loglik += penalty_weight * logdet
 
     for i in range(n):
-        residual[i] = sample_weight[i] * (y[i] - p[i]) + h[i] * (0.5 - p[i])
+        residual[i] = sample_weight[i] * (y[i] - p[i]) + penalty_scale * h[i] * (
+            0.5 - p[i]
+        )
 
     dgemv(X.T, residual, modified_score)
 
@@ -224,6 +248,7 @@ def newton_raphson_logistic(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
+    penalty_weight: float = 0.5,
 ) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, int]:
     """
     JIT-compiled Newton-Raphson solver for Firth logistic regression.
@@ -256,7 +281,7 @@ def newton_raphson_logistic(
     delta = np.zeros(k, dtype=np.float64)
 
     loglik, status = compute_logistic_quantities(
-        X, y, beta, sample_weight, offset, workspace
+        X, y, beta, sample_weight, offset, workspace, penalty_weight
     )
     if status != 0:
         return beta, loglik, fisher_info_aug, 0, status
@@ -294,7 +319,7 @@ def newton_raphson_logistic(
             beta_new[i] = beta[i] + delta[i]
 
         loglik_new, status = compute_logistic_quantities(
-            X, y, beta_new, sample_weight, offset, workspace
+            X, y, beta_new, sample_weight, offset, workspace, penalty_weight
         )
         if status != 0:
             return beta, loglik, fisher_info_aug, iteration, status
@@ -312,7 +337,7 @@ def newton_raphson_logistic(
                     beta_new[i] = beta[i] + step_factor * delta[i]
 
                 loglik_new, status = compute_logistic_quantities(
-                    X, y, beta_new, sample_weight, offset, workspace
+                    X, y, beta_new, sample_weight, offset, workspace, penalty_weight
                 )
                 if status != 0:
                     return beta, loglik, fisher_info_aug, iteration, status
@@ -351,6 +376,7 @@ def constrained_lrt_1df_logistic(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int, int]:  # loglik, iteration, status
     """
     Fit constrained model with beta[idx]=0 for likelihood ratio test.
@@ -396,7 +422,7 @@ def constrained_lrt_1df_logistic(
     beta[idx] = 0.0
 
     loglik, status = compute_logistic_quantities(
-        X, y, beta, sample_weight, offset, workspace
+        X, y, beta, sample_weight, offset, workspace, penalty_weight
     )
     if status != 0:
         return loglik, 0, status
@@ -446,7 +472,7 @@ def constrained_lrt_1df_logistic(
         beta_new[idx] = 0.0
 
         loglik_new, status = compute_logistic_quantities(
-            X, y, beta_new, sample_weight, offset, workspace
+            X, y, beta_new, sample_weight, offset, workspace, penalty_weight
         )
         if status != 0:
             return loglik, iteration, status
@@ -465,7 +491,7 @@ def constrained_lrt_1df_logistic(
                 beta_new[idx] = 0.0
 
                 loglik_new, status = compute_logistic_quantities(
-                    X, y, beta_new, sample_weight, offset, workspace
+                    X, y, beta_new, sample_weight, offset, workspace, penalty_weight
                 )
                 if status != 0:
                     return loglik, iteration, status
@@ -499,6 +525,7 @@ def profile_ci_bound_logistic(
     tol: float,
     D0: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],  # eta, p, w, sqrt_w, etc
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int, int]:  # bound, status, iter
     """Compute one profile likelihood CI bound using Venzon-Moolgavkar algorithm."""
     (
@@ -583,7 +610,7 @@ def profile_ci_bound_logistic(
     for iteration in range(1, max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
         loglik, status = compute_logistic_quantities(
-            X, y, theta, sample_weight, offset, workspace
+            X, y, theta, sample_weight, offset, workspace, penalty_weight
         )
         if status != 0:
             return theta[idx], status, iteration
