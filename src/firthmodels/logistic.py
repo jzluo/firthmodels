@@ -72,6 +72,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Parameter convergence criteria. Converged when max|delta| < xtol.
     fit_intercept : bool, default=True
         Whether to fit intercept
+    penalty_weight : float, default=0.5
+        Weight of the Firth penalty term. The default 0.5 corresponds to the standard
+        Firth bias reduction method (Firth, 1993), equivalent to using Jeffreys'
+        invariant prior. Set to 0 for unpenalized maximum likelihood estimation.
 
     Attributes
     ----------
@@ -138,6 +142,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         gtol: float = 1e-4,
         xtol: float = 1e-4,
         fit_intercept: bool = True,
+        penalty_weight: float = 0.5,
     ) -> None:
         self.solver = solver
         self.max_iter = max_iter
@@ -146,6 +151,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.gtol = gtol
         self.xtol = xtol
         self.fit_intercept = fit_intercept
+        self.penalty_weight = penalty_weight
         self.backend = backend
 
     def __sklearn_tags__(self) -> Tags:
@@ -245,6 +251,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 sample_weight=sample_weight,
                 offset=offset,
                 workspace=workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
                 max_halfstep=self.max_halfstep,
@@ -288,6 +295,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     beta=beta,
                     sample_weight=sample_weight,
                     offset=offset,
+                    penalty_weight=self.penalty_weight,
                     workspace=workspace,
                 )
 
@@ -467,6 +475,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 gtol=self.gtol,
                 xtol=self.xtol,
                 workspace=self._workspace.numba_buffers(),
+                penalty_weight=self.penalty_weight,
             )
             if status == _STATUS_STEP_HALVING_FAILED:
                 warnings.warn(
@@ -502,6 +511,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     beta=beta,
                     sample_weight=sample_weight,
                     offset=offset,
+                    penalty_weight=self.penalty_weight,
                     workspace=self._workspace,
                 )
 
@@ -612,6 +622,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     beta=beta,
                     sample_weight=sample_weight,
                     offset=offset,
+                    penalty_weight=self.penalty_weight,
                     workspace=self._workspace,
                 )
 
@@ -640,6 +651,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                                 tol=tol,
                                 D0=D0,
                                 workspace=self._workspace.numba_buffers(),
+                                penalty_weight=self.penalty_weight,
                             )
                             if status == _STATUS_RANK_DEFICIENT:
                                 raise scipy.linalg.LinAlgError(
@@ -752,8 +764,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             raise ValueError(
                 f"max_halfstep must be non-negative, got {self.max_halfstep}"
             )
+        if self.max_step < 0:
+            raise ValueError(f"max_step must be non-negative, got {self.max_step}")
         if self.gtol < 0 or self.xtol < 0:
             raise ValueError("gtol and xtol must be non-negative.")
+        if self.penalty_weight < 0 or not math.isfinite(self.penalty_weight):
+            raise ValueError(
+                f"penalty_weight must be non-negative and finite, got {self.penalty_weight}"
+            )
         X, y = validate_data(
             self,
             X,
@@ -791,7 +809,7 @@ class LogisticQuantities:
     loglik: float
     modified_score: NDArray[
         np.float64
-    ]  # (n_features,) U* = X'[weights*(y - p) + h*(0.5 - p)]
+    ]  # (n_features,) U* = X'[weights*(y - p) + 2 * penalty_weight * h * (0.5 - p)]
     fisher_info: NDArray[np.float64]  # (n_features, n_features) X'WX
 
 
@@ -860,6 +878,7 @@ def compute_logistic_quantities(
     sample_weight: NDArray[np.float64],
     offset: NDArray[np.float64],
     workspace: _Workspace,
+    penalty_weight: float = 0.5,
 ) -> LogisticQuantities:
     """Compute all quantities needed for one Newton-Raphson iteration."""
     n, k = X.shape
@@ -883,6 +902,26 @@ def compute_logistic_quantities(
     np.sqrt(ws.w, out=ws.sqrt_w)
     np.multiply(X.T, ws.sqrt_w, out=ws.XtW)
     np.matmul(ws.XtW, ws.XtW.T, out=ws.fisher_info)
+
+    if penalty_weight == 0.0:
+        # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta))
+        np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
+        np.logaddexp(
+            0, ws.eta, out=ws.sqrt_w_aug
+        )  # reuse, sqrt_w_aug = log(1 + exp(eta))
+        np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
+        loglik = float(sample_weight @ ws.w)
+
+        # score = X'[weights*(y-p)]
+        np.subtract(y, ws.p, out=ws.residual)
+        np.multiply(sample_weight, ws.residual, out=ws.residual)
+        modified_score = X.T @ ws.residual
+
+        return LogisticQuantities(
+            loglik=loglik,
+            modified_score=modified_score,
+            fisher_info=ws.fisher_info,
+        )
 
     try:
         L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
@@ -928,9 +967,12 @@ def compute_logistic_quantities(
         # hat diag: h_i = sum_j Q_ij^2
         np.einsum("ij, ij->i", Q, Q, out=ws.h)
 
+    penalty_scale = 2.0 * penalty_weight
+
     # augmented fisher information
-    # w_aug = (sample_weight + h) * p * (1 - p)
-    np.add(sample_weight, ws.h, out=ws.w_aug)
+    # w_aug = (sample_weight + 2*penalty_weight*h) * p * (1 - p)
+    np.multiply(ws.h, penalty_scale, out=ws.w_aug)
+    np.add(sample_weight, ws.w_aug, out=ws.w_aug)
     np.subtract(1.0, ws.p, out=ws.sqrt_w_aug)  # reuse
     np.multiply(ws.w_aug, ws.p, out=ws.w_aug)
     np.multiply(ws.w_aug, ws.sqrt_w_aug, out=ws.w_aug)
@@ -939,18 +981,19 @@ def compute_logistic_quantities(
     np.multiply(X.T, ws.sqrt_w_aug, out=ws.XtW_aug)
     np.matmul(ws.XtW_aug, ws.XtW_aug.T, out=ws.fisher_info_aug)
 
-    # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + 0.5 * logdet
+    # loglik = sample_weight @ (y * eta - np.logaddexp(0, eta)) + penalty_weight * logdet
     np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
     np.logaddexp(0, ws.eta, out=ws.sqrt_w_aug)  # reuse, sqrt_w_aug = log(1 + exp(eta))
     np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
-    loglik = sample_weight @ ws.w + 0.5 * logdet
+    loglik = sample_weight @ ws.w + penalty_weight * logdet
 
-    # modified score U* = X'[weights*(y-p) + h*(0.5-p)]
-    # residual = sample_weight * (y - p) + h * (0.5 - p)
+    # modified score U* = X'[weights*(y-p) + 2*penalty_weight*h*(0.5-p)]
+    # residual = sample_weight * (y - p) + 2*penalty_weight*h * (0.5 - p)
     np.subtract(y, ws.p, out=ws.residual)
     np.multiply(sample_weight, ws.residual, out=ws.residual)
     np.subtract(0.5, ws.p, out=ws.w)  # reuse, w = 0.5 - p
     np.multiply(ws.h, ws.w, out=ws.w)
+    np.multiply(ws.w, penalty_scale, out=ws.w)
     np.add(ws.residual, ws.w, out=ws.residual)
     modified_score = X.T @ ws.residual
 

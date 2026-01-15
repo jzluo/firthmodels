@@ -54,6 +54,10 @@ class FirthLogit:
         to add a constant column if desired.
     offset : array_like, optional
         Offset to be added to the linear predictor.
+    penalty_weight : float, default=0.5
+        Weight of the Firth penalty term. The default 0.5 corresponds to the standard
+        Firth bias reduction method (Firth, 1993), equivalent to using Jeffreys'
+        invariant prior. Set to 0 for unpenalized maximum likelihood estimation.
     missing : {'none', 'raise'}, default 'none'
         How to handle missing values. 'none' does no checking (NaN will
         cause errors during fitting). 'raise' checks inputs and raises
@@ -106,11 +110,13 @@ class FirthLogit:
         exog: ArrayLike,
         *,
         offset: ArrayLike | None = None,
+        penalty_weight: float = 0.5,
         **kwargs,
     ):
         self.endog = np.asarray(endog)
         self.exog = np.asarray(exog)
         self.offset = np.asarray(offset) if offset is not None else None
+        self.penalty_weight = penalty_weight
 
         missing = kwargs.pop("missing", "none")
 
@@ -276,6 +282,7 @@ class FirthLogit:
             max_iter=maxiter,
             gtol=gtol,
             xtol=xtol,
+            penalty_weight=self.penalty_weight,
         )
         estimator.fit(self.exog, self.endog, offset=self.offset)
         if pl:

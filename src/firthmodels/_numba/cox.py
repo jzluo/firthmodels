@@ -221,6 +221,7 @@ def _compute_firth_correction(
     Ix: NDArray[np.float64],
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
+    penalty_weight: float,
     workspace: tuple[NDArray[np.float64], ...],
 ):
     """Add Firth penalty term to score (modifies score in-place)."""
@@ -319,10 +320,10 @@ def _compute_firth_correction(
             term23[t] = total
 
         # firth_per_block = term1_contrib - 2 * term23_contrib
-        # firth_correction = 0.5 * np.einsum("b,bt->t", d_events, firth_per_block)
+        # firth_correction = penalty_weight * np.einsum("b,bt->t", d_events, firth_per_block)
         # modified_score = score + firth_correction
         for t in range(k):
-            modified_score[t] += 0.5 * d * (term1[t] - 2.0 * term23[t])
+            modified_score[t] += penalty_weight * d * (term1[t] - 2.0 * term23[t])
 
 
 @njit(cache=True, fastmath=True)
@@ -339,6 +340,7 @@ def compute_cox_quantities(
     term1: NDArray[np.float64],
     term23: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int]:
     """Compute loglik, score, and Fisher info for one iteration of Newton-Raphson."""
     n, k = X.shape
@@ -381,6 +383,9 @@ def compute_cox_quantities(
         fisher_info=fisher_info,
         c=c,
     )
+
+    if penalty_weight == 0.0:
+        return loglik, 0
 
     fisher_work[:, :] = fisher_info
     info = dpotrf(fisher_work)  # fisher_work now holds L
@@ -439,10 +444,11 @@ def compute_cox_quantities(
         Ix=Ix,
         term1=term1,
         term23=term23,
+        penalty_weight=penalty_weight,
         workspace=workspace,
     )
 
-    loglik += 0.5 * logdet
+    loglik += penalty_weight * logdet
 
     return loglik, 0  # status success
 
@@ -459,6 +465,7 @@ def newton_raphson_cox(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],
+    penalty_weight: float = 0.5,
 ) -> tuple[NDArray[np.float64], float, NDArray[np.float64], int, int]:
     """
     JIT-compiled Newton-Raphson solver for Firth Cox proportional hazards.
@@ -506,6 +513,7 @@ def newton_raphson_cox(
         term1=term1,
         term23=term23,
         workspace=workspace,
+        penalty_weight=penalty_weight,
     )
     if status != 0:
         return beta, loglik, fisher_info, 0, status
@@ -550,6 +558,7 @@ def newton_raphson_cox(
             term1=term1,
             term23=term23,
             workspace=workspace,
+            penalty_weight=penalty_weight,
         )
         if status != 0:
             return beta, loglik, fisher_info, iteration, status
@@ -577,6 +586,7 @@ def newton_raphson_cox(
                     term1=term1,
                     term23=term23,
                     workspace=workspace,
+                    penalty_weight=penalty_weight,
                 )
                 if status != 0:
                     return beta, loglik, fisher_info, iteration, status
@@ -604,6 +614,7 @@ def newton_raphson_cox(
                     term1=term1,
                     term23=term23,
                     workspace=workspace,
+                    penalty_weight=penalty_weight,
                 )
                 return beta, loglik, fisher_info, iteration, _STATUS_STEP_HALVING_FAILED
 
@@ -624,6 +635,7 @@ def constrained_lrt_1df_cox(
     gtol: float,
     xtol: float,
     workspace: tuple[NDArray[np.float64], ...],
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int, int]:  # loglik, iteration, status
     """
     Fit constrained model with beta[idx]=0 for likelihood ratio test.
@@ -686,6 +698,7 @@ def constrained_lrt_1df_cox(
         term1=term1,
         term23=term23,
         workspace=workspace,
+        penalty_weight=penalty_weight,
     )
     if status != 0:
         return loglik, 0, status
@@ -745,6 +758,7 @@ def constrained_lrt_1df_cox(
             term1=term1,
             term23=term23,
             workspace=workspace,
+            penalty_weight=penalty_weight,
         )
         if status != 0:
             return loglik, iteration, status
@@ -774,6 +788,7 @@ def constrained_lrt_1df_cox(
                     term1=term1,
                     term23=term23,
                     workspace=workspace,
+                    penalty_weight=penalty_weight,
                 )
                 if status != 0:
                     return loglik, iteration, status
@@ -807,6 +822,7 @@ def profile_ci_bound_cox(
     tol: float,
     D0: NDArray[np.float64],
     workspace: tuple[NDArray[np.float64], ...],
+    penalty_weight: float = 0.5,
 ) -> tuple[float, int, int]:  # bound, converged, iter
     """Compute one profile likelihood CI bound using Venzon-Moolgavkar algorithm."""
     (
@@ -909,6 +925,7 @@ def profile_ci_bound_cox(
             term1=term1,
             term23=term23,
             workspace=workspace,
+            penalty_weight=penalty_weight,
         )
         if status != 0:
             return theta[idx], status, iteration
