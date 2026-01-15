@@ -314,3 +314,25 @@ class TestFirthLogisticRegression:
         ci_fallback = model2.conf_int(method="pl", features=[0])
 
         np.testing.assert_allclose(ci_fallback, ci_normal, rtol=1e-6)
+
+    def test_penalty_weight_zero_matches_statsmodels_logit(self):
+        rng = np.random.default_rng(42)
+        n = 100
+        X = rng.normal(size=(n, 2))
+        y = (X[:, 0] + 0.5 * X[:, 1] + rng.normal(size=n) > 0).astype(int)
+
+        model = FirthLogisticRegression(penalty_weight=0.0, backend="numpy")
+        model.fit(X, y)
+
+        # reference values from statsmodels.Logit
+        expected_coef = np.array([1.280948872082475, 0.8355492113556787])
+        expected_intercept = -0.23946936192074375
+        expected_loglik = -53.05056639711207
+        expected_bse = np.array(
+            [0.3234518226850226, 0.30390835495350266, 0.23902120281062053]
+        )
+
+        np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-5)
+        np.testing.assert_allclose(model.intercept_, expected_intercept, rtol=1e-5)
+        np.testing.assert_allclose(model.loglik_, expected_loglik, rtol=1e-5)
+        np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-5)
