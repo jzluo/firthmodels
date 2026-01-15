@@ -57,6 +57,11 @@ class FirthCoxPH(BaseEstimator):
         Gradient convergence criteria. Converged when max|gradient| < gtol.
     xtol : float, default=1e-6
         Parameter convergence criteria. Converged when max|delta| < xtol.
+    penalty_weight : float, default=0.5
+        Weight of the Firth penalty term. The default 0.5 corresponds to the standard
+        Firth bias reduction method (Heinze and Schemper, 2001), equivalent to using
+        Jeffreys' invariant prior. Set to 0 for unpenalized Cox partial likelihood
+        estimation.
 
     Attributes
     ----------
@@ -103,6 +108,7 @@ class FirthCoxPH(BaseEstimator):
         max_halfstep: int = 5,
         gtol: float = 1e-4,
         xtol: float = 1e-6,
+        penalty_weight: float = 0.5,
     ) -> None:
         self.backend = backend
         self.max_iter = max_iter
@@ -110,6 +116,7 @@ class FirthCoxPH(BaseEstimator):
         self.max_halfstep = max_halfstep
         self.gtol = gtol
         self.xtol = xtol
+        self.penalty_weight = penalty_weight
 
     def _resolve_backend(self) -> Literal["numba", "numpy"]:
         if self.backend == "auto":
@@ -144,6 +151,22 @@ class FirthCoxPH(BaseEstimator):
         self : FirthCoxPH
             Fitted estimator.
         """
+        if self.max_iter <= 0:
+            raise ValueError(f"max_iter must be positive, got {self.max_iter}")
+        if self.max_halfstep < 0:
+            raise ValueError(
+                f"max_halfstep must be non-negative, got {self.max_halfstep}"
+            )
+        if self.max_step < 0:
+            raise ValueError(f"max_step must be non-negative, got {self.max_step}")
+        if self.gtol < 0 or self.xtol < 0:
+            raise ValueError("gtol and xtol must be non-negative.")
+        if self.penalty_weight < 0 or not math.isfinite(self.penalty_weight):
+            raise ValueError(
+                f"penalty_weight must be non-negative and finite, "
+                f"got {self.penalty_weight}"
+            )
+
         X = validate_data(self, X, dtype=np.float64, ensure_min_samples=2)
         X = cast(NDArray[np.float64], X)
         event, time = _validate_survival_y(y, n_samples=X.shape[0])

@@ -72,6 +72,10 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         Parameter convergence criteria. Converged when max|delta| < xtol.
     fit_intercept : bool, default=True
         Whether to fit intercept
+    penalty_weight : float, default=0.5
+        Weight of the Firth penalty term. The default 0.5 corresponds to the standard
+        Firth bias reduction method (Firth, 1993), equivalent to using Jeffreys'
+        invariant prior. Set to 0 for unpenalized maximum likelihood estimation.
 
     Attributes
     ----------
@@ -138,6 +142,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         gtol: float = 1e-4,
         xtol: float = 1e-4,
         fit_intercept: bool = True,
+        penalty_weight: float = 0.5,
     ) -> None:
         self.solver = solver
         self.max_iter = max_iter
@@ -146,6 +151,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.gtol = gtol
         self.xtol = xtol
         self.fit_intercept = fit_intercept
+        self.penalty_weight = penalty_weight
         self.backend = backend
 
     def __sklearn_tags__(self) -> Tags:
@@ -752,8 +758,14 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             raise ValueError(
                 f"max_halfstep must be non-negative, got {self.max_halfstep}"
             )
+        if self.max_step < 0:
+            raise ValueError(f"max_step must be non-negative, got {self.max_step}")
         if self.gtol < 0 or self.xtol < 0:
             raise ValueError("gtol and xtol must be non-negative.")
+        if self.penalty_weight < 0 or not math.isfinite(self.penalty_weight):
+            raise ValueError(
+                f"penalty_weight must be non-negative and finite, got {self.penalty_weight}"
+            )
         X, y = validate_data(
             self,
             X,
