@@ -2,7 +2,7 @@ cff-version: 1.2.0
 title: firthmodels
 message: "If you use this software, please cite it as below."
 type: software
-version: 0.5.0
+version: 0.6.0
 doi: 10.5281/zenodo.17863280
 authors:
   - family-names: Luo
