@@ -243,6 +243,37 @@ class TestFirthCoxPH:
         with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
             FirthCoxPH(backend="numpy").fit(X, y)
 
+    def test_penalty_weight_zero_matches_lifelines_coxph(self):
+        rng = np.random.default_rng(42)
+        n = 100
+
+        x1 = rng.standard_normal(n)
+        x2 = rng.uniform(-1, 1, n)
+        X = np.column_stack([x1, x2])
+
+        beta_true = np.array([0.5, -0.3])
+        eta = X @ beta_true
+
+        baseline_hazard = 0.1
+        survival_time = rng.exponential(1 / (baseline_hazard * np.exp(eta)))
+        censor_time = rng.exponential(scale=10.0, size=n)
+
+        time = np.minimum(survival_time, censor_time)
+        event = survival_time <= censor_time
+        y = _structured_y(event, time)
+
+        model = FirthCoxPH(penalty_weight=0.0, backend="numpy")
+        model.fit(X, y)
+
+        # reference values from lifelines CoxPHFitter
+        expected_coef = np.array([0.524213441484833, -0.027371010108854982])
+        expected_loglik = -200.1427020304977
+        expected_bse = np.array([0.17439918364226892, 0.24924619900371428])
+
+        np.testing.assert_allclose(model.coef_, expected_coef, rtol=1e-5)
+        np.testing.assert_allclose(model.loglik_, expected_loglik, rtol=1e-5)
+        np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-5)
+
 
 class TestConcordanceIndex:
     def test_counts_concordant_discordant_pairs(self):

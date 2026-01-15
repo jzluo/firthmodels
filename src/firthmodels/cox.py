@@ -222,7 +222,12 @@ class FirthCoxPH(BaseEstimator):
         else:  # numpy backend
             # Create closure for newton_raphson
             def quantities(beta: NDArray[np.float64]) -> CoxQuantities:
-                return compute_cox_quantities(beta, precomputed, workspace)
+                return compute_cox_quantities(
+                    beta=beta,
+                    precomputed=precomputed,
+                    workspace=workspace,
+                    penalty_weight=self.penalty_weight,
+                )
 
             # Run optimizer
             result = newton_raphson(
@@ -416,7 +421,10 @@ class FirthCoxPH(BaseEstimator):
 
             def compute_quantities_full(beta):
                 return compute_cox_quantities(
-                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                    beta=beta,
+                    precomputed=self._precomputed,
+                    workspace=self._workspace,
+                    penalty_weight=self.penalty_weight,
                 )
 
             result = constrained_lrt_1df(
@@ -545,7 +553,10 @@ class FirthCoxPH(BaseEstimator):
 
             def compute_quantities_full(beta: NDArray[np.float64]):
                 return compute_cox_quantities(
-                    beta=beta, precomputed=self._precomputed, workspace=self._workspace
+                    beta=beta,
+                    precomputed=self._precomputed,
+                    workspace=self._workspace,
+                    penalty_weight=self.penalty_weight,
                 )
 
             theta_hat = self.coef_.copy()
@@ -925,6 +936,7 @@ def compute_cox_quantities(
     beta: NDArray[np.float64],
     precomputed: _CoxPrecomputed,
     workspace: _Workspace,
+    penalty_weight: float = 0.5,
 ) -> CoxQuantities:
     """
     Compute all quantities needed for one Newton-Raphson iteration.
@@ -937,6 +949,11 @@ def compute_cox_quantities(
         Precomputed data from _CoxPrecomputed.from_data().
     workspace : _Workspace
         Pre-allocated arrays to avoid repeated memory allocation.
+    penalty_weight : float, default=0.5
+        Weight of the Firth penalty term. The default 0.5 corresponds to the standard
+        Firth bias reduction method (Heinze and Schemper, 2001), equivalent to using
+        Jeffreys' invariant prior. Set to 0 for unpenalized Cox partial likelihood
+        estimation.
 
     Returns
     -------
@@ -993,6 +1010,13 @@ def compute_cox_quantities(
     # in the risk set, i.e. V = S2/S0 - x_bar x_bar^T.
     V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
     np.einsum("b,brt->rt", d_events, V, out=ws.fisher_info)
+
+    if penalty_weight == 0.0:
+        return CoxQuantities(
+            loglik=loglik,
+            modified_score=score,
+            fisher_info=ws.fisher_info,
+        )
 
     try:
         L, info = dpotrf(ws.fisher_info, lower=1, overwrite_a=0)
@@ -1056,11 +1080,11 @@ def compute_cox_quantities(
     Ix = x_bar @ inv_fisher_info  # (n_event_blocks, k)
     term23_contrib = np.einsum("brt,br->bt", V, Ix)
 
-    # Firth correction: 0.5 * sum over event blocks of d * (term1 - 2*term23)
+    # Firth correction: penalty_weight * sum over event blocks of d * (term1 - 2*term23)
     firth_per_block = term1_contrib - 2 * term23_contrib
-    firth_correction = 0.5 * np.einsum("b,bt->t", d_events, firth_per_block)
+    firth_correction = penalty_weight * np.einsum("b,bt->t", d_events, firth_per_block)
     modified_score = score + firth_correction
-    loglik = loglik + 0.5 * logdet
+    loglik = loglik + penalty_weight * logdet
 
     return CoxQuantities(
         loglik=loglik,
