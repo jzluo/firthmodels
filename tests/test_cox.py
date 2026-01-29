@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import polars as pl
 import pytest
 import scipy.linalg
 
@@ -165,6 +167,64 @@ class TestFirthCoxPH:
         )
 
         np.testing.assert_allclose(ci, expected_ci, rtol=1e-6)
+
+    def test_accepts_pandas(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        X_df = pd.DataFrame(X, columns=["x1", "x2", "x3", "x4"])
+        event_s = pd.Series(event, name="event")
+        time_s = pd.Series(time, name="time")
+
+        model = FirthCoxPH(backend="numpy").fit(X_df, (event_s, time_s))
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+        model.lrt("x2")
+        assert not np.isnan(model.lrt_pvalues_[1])
+
+    def test_accepts_polars(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        X_pl = pl.DataFrame(X, schema=["x1", "x2", "x3", "x4"])
+        event_s = pl.Series("event", event)
+        time_s = pl.Series("time", time)
+
+        model = FirthCoxPH(backend="numpy").fit(X_pl, (event_s, time_s))
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+        model.lrt(["x2", "x4"])
+        scores = model.predict(X_pl)
+        assert scores.shape == (len(event),)
+
+    def test_polars_non_numeric_raises(self):
+        X = pl.DataFrame({"x1": [0, 1, 0], "x2": ["a", "b", "c"]})
+        event = pl.Series("event", [1, 0, 1])
+        time = pl.Series("time", [1.0, 2.0, 3.0])
+
+        with pytest.raises(ValueError, match="could not convert|dtype"):
+            FirthCoxPH(backend="numpy").fit(X, (event, time))
+
+    def test_polars_negative_time_raises(self):
+        X = pl.DataFrame({"x1": [0, 1, 0], "x2": [0.1, 0.2, 0.3]})
+        event = pl.Series("event", [1, 0, 1])
+        time = pl.Series("time", [1.0, -1.0, 3.0])
+
+        with pytest.raises(ValueError, match="non-negative"):
+            FirthCoxPH(backend="numpy").fit(X, (event, time))
+
+    def test_polars_no_events_raises(self):
+        X = pl.DataFrame({"x1": [0, 1, 0], "x2": [0.1, 0.2, 0.3]})
+        event = pl.Series("event", [0, 0, 0])
+        time = pl.Series("time", [1.0, 2.0, 3.0])
+
+        with pytest.raises(ValueError, match="At least one event"):
+            FirthCoxPH(backend="numpy").fit(X, (event, time))
+
+    def test_polars_lazyframe_raises(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        X_pl = pl.DataFrame(X, schema=["x1", "x2", "x3", "x4"]).lazy()
+        event_s = pl.Series("event", event)
+        time_s = pl.Series("time", time)
+
+        with pytest.raises(ValueError):
+            FirthCoxPH(backend="numpy").fit(X_pl, (event_s, time_s))
 
     def test_lrt_warm_start_matches(self, cox_separation_data):
         X, time, event = cox_separation_data

@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import polars as pl
 import pytest
 import scipy.linalg
 from scipy.special import expit as scipy_expit
@@ -234,6 +236,49 @@ class TestFirthLogisticRegressionNumba:
             model = FirthLogisticRegression(backend="numba")
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
+
+    def test_numba_accepts_pandas(self, separation_data_df):
+        X, y = separation_data_df
+        y = pd.Series(y, name="outcome")
+        sample_weight = pd.Series(np.ones(len(y)), name="weight")
+        offset = pd.Series(np.zeros(len(y)), name="offset")
+
+        model = FirthLogisticRegression(backend="numba").fit(
+            X, y, sample_weight=sample_weight, offset=offset
+        )
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+
+    def test_numba_accepts_polars(self, separation_data_df):
+        X_pd, y = separation_data_df
+        X = pl.from_pandas(X_pd)
+        y = pl.Series("y", y)
+        sample_weight = pl.Series("weight", np.ones(len(y)))
+        offset = pl.Series("offset", np.zeros(len(y)))
+
+        model = FirthLogisticRegression(backend="numba").fit(
+            X, y, sample_weight=sample_weight, offset=offset
+        )
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+        model.lrt(["x2", "x4"])
+        proba = model.predict_proba(X)
+        assert proba.shape == (len(y), 2)
+
+    def test_numba_polars_non_numeric_raises(self):
+        X = pl.DataFrame({"x1": [0, 1, 0], "x2": ["a", "b", "c"]})
+        y = pl.Series("y", [0, 1, 0])
+
+        with pytest.raises(ValueError, match="could not convert|dtype"):
+            FirthLogisticRegression(backend="numba").fit(X, y)
+
+    def test_numba_polars_lazyframe_raises(self, separation_data_df):
+        X_pd, y = separation_data_df
+        X = pl.from_pandas(X_pd).lazy()
+        y = pl.Series("y", y)
+
+        with pytest.raises(ValueError):
+            FirthLogisticRegression(backend="numba").fit(X, y)
 
     def test_numba_symmetrizes_fisher_info_on_cholesky_fail_raises_rank_deficient(self):
         rng = np.random.default_rng(0)

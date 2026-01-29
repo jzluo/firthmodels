@@ -1,6 +1,8 @@
 import warnings
 
 import numpy as np
+import pandas as pd
+import polars as pl
 import pytest
 import scipy.linalg
 from sklearn.utils.estimator_checks import estimator_checks_generator
@@ -206,6 +208,49 @@ class TestFirthLogisticRegression:
 
         with pytest.raises(KeyError, match="Unknown feature"):
             model.lrt("nonexistent")
+
+    def test_accepts_pandas(self, separation_data_df):
+        X, y = separation_data_df
+        y = pd.Series(y, name="outcome")
+        sample_weight = pd.Series(np.ones(len(y)), name="weight")
+        offset = pd.Series(np.zeros(len(y)), name="offset")
+
+        model = FirthLogisticRegression(backend="numpy").fit(
+            X, y, sample_weight=sample_weight, offset=offset
+        )
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+
+    def test_accepts_polars(self, separation_data_df):
+        X, y = separation_data_df
+        X = pl.from_pandas(X)
+        y = pl.Series("y", y)
+        sample_weight = pl.Series("weight", np.ones(len(y)))
+        offset = pl.Series("offset", np.zeros(len(y)))
+
+        model = FirthLogisticRegression(backend="numpy").fit(
+            X, y, sample_weight=sample_weight, offset=offset
+        )
+
+        assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
+        model.lrt(["x2", "x4"])
+        proba = model.predict_proba(X)
+        assert proba.shape == (len(y), 2)
+
+    def test_polars_non_numeric_raises(self):
+        X = pl.DataFrame({"x1": [0, 1, 0], "x2": ["a", "b", "c"]})
+        y = pl.Series("y", [0, 1, 0])
+
+        with pytest.raises(ValueError, match="could not convert|dtype"):
+            FirthLogisticRegression(backend="numpy").fit(X, y)
+
+    def test_polars_lazyframe_raises(self, separation_data_df):
+        X, y = separation_data_df
+        X = pl.from_pandas(X).lazy()
+        y = pl.Series("y", y)
+
+        with pytest.raises(ValueError):
+            FirthLogisticRegression(backend="numpy").fit(X, y)
 
     def test_qr_fallback_in_compute_quantities(self, separation_data, monkeypatch):
         X, y = separation_data

@@ -7,7 +7,7 @@ license = "MIT"
 authors = [
     { name = "Jon Luo", email = "20971593+jzluo@users.noreply.github.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = [
     "firth",
     "firth logistic regression",
@@ -27,6 +27,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -65,6 +66,8 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
     "numba>=0.63",
+    "polars>=1.37.1",
+    "typing-extensions>=4.15.0",
 ]
 
 [tool.ruff]
