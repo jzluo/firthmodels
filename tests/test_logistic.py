@@ -210,8 +210,6 @@ class TestFirthLogisticRegression:
             model.lrt("nonexistent")
 
     def test_accepts_pandas(self, separation_data_df):
-        import pandas as pd
-
         X, y = separation_data_df
         y = pd.Series(y, name="outcome")
         sample_weight = pd.Series(np.ones(len(y)), name="weight")
@@ -224,8 +222,6 @@ class TestFirthLogisticRegression:
         assert list(model.feature_names_in_) == ["x1", "x2", "x3", "x4"]
 
     def test_accepts_polars(self, separation_data_df):
-        import polars as pl
-
         X, y = separation_data_df
         X = pl.from_pandas(X)
         y = pl.Series("y", y)
@@ -242,8 +238,6 @@ class TestFirthLogisticRegression:
         assert proba.shape == (len(y), 2)
 
     def test_polars_non_numeric_raises(self):
-        import polars as pl
-
         X = pl.DataFrame({"x1": [0, 1, 0], "x2": ["a", "b", "c"]})
         y = pl.Series("y", [0, 1, 0])
 
@@ -251,8 +245,6 @@ class TestFirthLogisticRegression:
             FirthLogisticRegression(backend="numpy").fit(X, y)
 
     def test_polars_lazyframe_raises(self, separation_data_df):
-        import polars as pl
-
         X, y = separation_data_df
         X = pl.from_pandas(X).lazy()
         y = pl.Series("y", y)
