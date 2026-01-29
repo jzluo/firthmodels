@@ -27,7 +27,7 @@ for Firth-penalized logistic regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.7.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.7.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **brglm2** | 1.0.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 | **logistf** | 1.26.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
@@ -97,7 +97,7 @@ for Firth-penalized Cox proportional hazards regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.7.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.7.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **coxphf** | 1.13.4 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
 ### Configuration

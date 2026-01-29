@@ -226,7 +226,13 @@ def save_logistic_plot(
     ax.plot(
         df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
     )
-    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
+    ax.plot(
+        df["k"],
+        df["brglm2_mpl_fit_ms"],
+        "v-",
+        label="brglm2 (MPL_Jeffreys)",
+        linewidth=2,
+    )
     ax.set_xlabel("Number of features")
     ax.set_ylabel("Time (ms)")
     ax.set_title("Fit Only")
@@ -275,7 +281,13 @@ def save_logistic_plot(
     ax.plot(
         df["k"], df["brglm2_as_fit_ms"], "^-", label="brglm2 (AS-mean)", linewidth=2
     )
-    ax.plot(df["k"], df["brglm2_mpl_fit_ms"], "v-", label="brglm2 (MPL)", linewidth=2)
+    ax.plot(
+        df["k"],
+        df["brglm2_mpl_fit_ms"],
+        "v-",
+        label="brglm2 (MPL_Jeffreys)",
+        linewidth=2,
+    )
     ax.set_xlabel("Number of features")
     ax.set_ylabel("Time (ms)")
     ax.set_ylim(0, fit_ylim)
