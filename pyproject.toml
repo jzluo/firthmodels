@@ -67,6 +67,7 @@ dev = [
     "ruff>=0.14.8",
     "numba>=0.63",
     "polars>=1.37.1",
+    "typing-extensions>=4.15.0",
 ]
 
 [tool.ruff]

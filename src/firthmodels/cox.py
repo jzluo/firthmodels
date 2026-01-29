@@ -3,7 +3,12 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Literal, Self, Sequence, cast
+from typing import Literal, Sequence, cast
+
+try:
+    from typing import Self
+except ImportError:  # Python < 3.11
+    from typing_extensions import Self
 
 import numpy as np
 import scipy
