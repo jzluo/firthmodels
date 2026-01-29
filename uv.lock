@@ -143,9 +143,20 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
+dev = [
+    { name = "formulaic" },
+    { name = "mypy" },
+    { name = "numba" },
+    { name = "pandas" },
+    { name = "polars" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
 formula = [
     { name = "formulaic" },
 ]
@@ -163,18 +174,26 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "typing-extensions" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "formulaic", marker = "extra == 'dev'", specifier = ">=1.2.1" },
     { name = "formulaic", marker = "extra == 'formula'", specifier = ">=1.2.1" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.0" },
+    { name = "numba", marker = "extra == 'dev'", specifier = ">=0.63" },
     { name = "numba", marker = "extra == 'numba'", specifier = ">=0.63" },
     { name = "numpy", specifier = ">=1.24" },
+    { name = "pandas", marker = "extra == 'dev'", specifier = ">=1.5.3" },
+    { name = "polars", marker = "extra == 'dev'", specifier = ">=1.37.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.1" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.8" },
     { name = "scikit-learn", specifier = ">=1.6" },
     { name = "scipy", specifier = ">=1.12" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'", specifier = ">=4.15.0" },
 ]
-provides-extras = ["formula", "numba"]
+provides-extras = ["formula", "numba", "dev"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -186,7 +205,6 @@ dev = [
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.14.8" },
-    { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 
 [[package]]

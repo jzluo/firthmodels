@@ -38,6 +38,7 @@ dependencies = [
     "numpy>=1.24",
     "scikit-learn>=1.6",
     "scipy>=1.12",
+    "typing-extensions>=4.15.0; python_version < '3.11'",
 ]
 
 [project.urls]
@@ -51,6 +52,16 @@ formula = [
 ]
 numba = [
     "numba>=0.63",
+]
+dev = [
+    "formulaic>=1.2.1",
+    "mypy>=1.19.0",
+    "pandas>=1.5.3",
+    "pytest>=9.0.1",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.14.8",
+    "numba>=0.63",
+    "polars>=1.37.1",
 ]
 
 [build-system]
@@ -67,7 +78,6 @@ dev = [
     "ruff>=0.14.8",
     "numba>=0.63",
     "polars>=1.37.1",
-    "typing-extensions>=4.15.0",
 ]
 
 [tool.ruff]
