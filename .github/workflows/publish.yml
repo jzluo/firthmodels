@@ -83,7 +83,7 @@ jobs:
       - name: Verify import and run tests
         run: |
           python -c "from firthmodels import FirthLogisticRegression; print('Import OK')"
-          uv pip install --system pytest pandas
+          uv pip install --system pytest pandas polars
           pytest tests/
 
   publish-pypi:
