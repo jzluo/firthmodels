@@ -72,7 +72,7 @@ print(result.summary())
 pip install firthmodels
 ```
 
-Requires Python 3.11+ and depends on NumPy, SciPy, and scikit-learn.
+Requires Python 3.10+ and depends on NumPy, SciPy, and scikit-learn.
 
 Optional dependencies:
 - Numba acceleration: `pip install firthmodels[numba]`
