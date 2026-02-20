@@ -1,6 +1,6 @@
 [project]
 name = "firthmodels"
-version = "0.7.1"
+version = "0.7.2"
 description = "Firth-penalized models in Python"
 readme = "README.md"
 license = "MIT"
