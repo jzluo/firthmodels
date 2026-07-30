@@ -140,6 +140,19 @@ def compute_logistic_quantities(
 
     info = dpotrf(fisher_info)
     if info == 0:
+        # check pivots, dpotrf can return info=0 on a singular matrix on Accelerate
+        diag_max = fisher_info[0, 0]
+        diag_min = fisher_info[0, 0]
+        for i in range(1, k):
+            d = fisher_info[i, i]
+            if d > diag_max:
+                diag_max = d
+            if d < diag_min:
+                diag_min = d
+        chol_tol = np.sqrt(max(n, k) * np.finfo(np.float64).eps) * diag_max
+        if diag_min <= chol_tol:
+            info = 1
+    if info == 0:
         logdet = 0.0
         for i in range(k):
             logdet += np.log(fisher_info[i, i])
