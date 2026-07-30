@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Literal, Protocol, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,6 +16,7 @@ class FirthResult:
     ]  # (n_features, n_features) Fisher information matrix
     n_iter: int  # number of iterations
     converged: bool  # whether optimization converged
+    failure_reason: Literal["step_halving", "max_iter"] | None = None
 
 
 class IterationQuantities(Protocol):

@@ -254,6 +254,45 @@ class TestFirthLogisticRegressionNumba:
             model.lrt_bse_[0], abs(model.coef_[0]) / np.sqrt(chi2)
         )
 
+    def test_numba_failed_lrt_is_nan_and_can_retry(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numba").fit(X, y)
+        model.max_iter = 1
+
+        with pytest.warns(ConvergenceWarning, match="LRT for parameter 0") as caught:
+            model.lrt(0, warm_start=False)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
+        model.max_iter = 25
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.lrt(0, warm_start=False)
+
+        assert np.isfinite(model.lrt_pvalues_[0])
+        assert np.isfinite(model.lrt_bse_[0])
+
+    def test_numba_step_halving_lrt_is_nan(self, separation_data, monkeypatch):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numba").fit(X, y)
+
+        def fake_constrained_lrt(*args, **kwargs):
+            return model.loglik_ - 1.0, 2, _STATUS_STEP_HALVING_FAILED
+
+        monkeypatch.setattr(
+            "firthmodels.logistic.constrained_lrt_1df_logistic",
+            fake_constrained_lrt,
+        )
+
+        with pytest.warns(ConvergenceWarning, match="step_halving"):
+            model.lrt(0)
+
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
     def test_numba_converged_on_final_step(self, separation_data):
         X, y = separation_data
         model = FirthLogisticRegression(backend="numba").fit(X, y)

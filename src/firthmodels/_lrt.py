@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import scipy
@@ -15,6 +15,9 @@ class LRTResult:
     chi2: float
     pvalue: float
     bse_backcorrected: float
+    valid: bool
+    n_iter: int
+    failure_reason: Literal["step_halving", "max_iter", "nonfinite"] | None = None
 
 
 @dataclass
@@ -22,6 +25,47 @@ class _SlicedQuantities:
     loglik: float
     modified_score: NDArray[np.float64]
     fisher_info: NDArray[np.float64]
+
+
+def lrt_result_from_loglik(
+    *,
+    beta: float,
+    loglik_full: float,
+    loglik_constrained: float,
+    converged: bool,
+    n_iter: int,
+    failure_reason: Literal["step_halving", "max_iter", "nonfinite"] | None = None,
+) -> LRTResult:
+    if not converged:
+        return LRTResult(
+            chi2=math.nan,
+            pvalue=math.nan,
+            bse_backcorrected=math.nan,
+            valid=False,
+            n_iter=n_iter,
+            failure_reason=failure_reason,
+        )
+
+    if not math.isfinite(loglik_full) or not math.isfinite(loglik_constrained):
+        return LRTResult(
+            chi2=math.nan,
+            pvalue=math.nan,
+            bse_backcorrected=math.nan,
+            valid=False,
+            n_iter=n_iter,
+            failure_reason="nonfinite",
+        )
+
+    chi2 = max(0.0, 2.0 * (loglik_full - loglik_constrained))
+    pval = scipy.stats.chi2.sf(chi2, df=1)
+    bse = abs(beta) / math.sqrt(chi2) if chi2 > 0 else math.inf
+    return LRTResult(
+        chi2=chi2,
+        pvalue=pval,
+        bse_backcorrected=bse,
+        valid=True,
+        n_iter=n_iter,
+    )
 
 
 def constrained_lrt_1df(
@@ -78,6 +122,13 @@ def constrained_lrt_1df(
             p-value from chi-squared distribution with 1 degree of freedom.
         bse_backcorrected : float
             Back-corrected standard error, |beta[idx]| / sqrt(chi2).
+        valid : bool
+            Whether inference is valid. False if the constrained fit did not
+            converge or either penalized log-likelihood is non-finite.
+        n_iter : int
+            Number of constrained-fit Newton steps.
+        failure_reason : {'step_halving', 'max_iter', 'nonfinite'} or None
+            Reason inference was withheld when the constrained fit was invalid.
     """
     k = beta_hat_full.shape[0]
     free_indices = [i for i in range(k) if i != idx]
@@ -100,6 +151,10 @@ def constrained_lrt_1df(
             fisher_info=q.fisher_info[ix_grid],
         )
 
+    converged = True
+    n_iter = 0
+    failure_reason = None
+
     if k == 1:
         # No nuisance parameters remain, so the constrained model is specified by
         # beta[idx] = 0 and there is nothing to optimize
@@ -114,12 +169,18 @@ def constrained_lrt_1df(
             gtol=gtol,
             xtol=xtol,
             beta_init=beta_init_free,
+            warn_on_failure=False,
         )
         loglik_constrained = reduced_result.loglik
+        converged = reduced_result.converged
+        n_iter = reduced_result.n_iter
+        failure_reason = reduced_result.failure_reason
 
-    chi2 = max(0.0, 2.0 * (loglik_full - loglik_constrained))
-    pval = scipy.stats.chi2.sf(chi2, df=1)
-
-    # back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
-    bse = abs(beta_hat_full[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
-    return LRTResult(chi2=chi2, pvalue=pval, bse_backcorrected=bse)
+    return lrt_result_from_loglik(
+        beta=beta_hat_full[idx],
+        loglik_full=loglik_full,
+        loglik_constrained=loglik_constrained,
+        converged=converged,
+        n_iter=n_iter,
+        failure_reason=failure_reason,
+    )

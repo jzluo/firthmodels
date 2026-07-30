@@ -253,7 +253,8 @@ class FirthLogit:
 
         When `pl=True`, the likelihood ratio test is computed at fit time,
         which adds computational overhead proportional to the number of
-        parameters.
+        parameters. If LRT inference cannot be computed for a parameter, its
+        p-value is NaN and a convergence warning is emitted.
 
         Examples
         --------
@@ -316,7 +317,8 @@ class FirthLogitResults:
         Wald z-statistics (params / bse). Note: when `pl=True`, these do
         not correspond to `pvalues` (which are from LRT).
     pvalues : ndarray
-        Two-sided p-values. LRT if `pl=True`, Wald if `pl=False`.
+        Two-sided p-values. LRT if `pl=True`, Wald if `pl=False`. With
+        `pl=True`, values are NaN where LRT inference could not be computed.
     llf : float
         Penalized log-likelihood at the fitted parameters.
     converged : bool

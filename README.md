@@ -185,6 +185,10 @@ model.lrt_bse_         # Back-corrected standard errors (separate from Wald bse_
 Each feature requires a separate constrained model fit, so you can test selectively to
 avoid unnecessary computation. By default, LRT uses a warm start based on the full-model
 covariance to reduce Newton-Raphson iterations; pass `warm_start=False` to disable it.
+If the full-model fit does not converge, its likelihood is non-finite, or a constrained
+fit does not converge, a warning is emitted and the affected p-values and
+back-corrected standard errors remain `NaN`. A later explicit `lrt()` call retries
+failed constrained fits.
 
 ```python
 model.lrt(0)              # Single feature by index
