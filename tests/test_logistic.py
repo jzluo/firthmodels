@@ -5,6 +5,7 @@ import pandas as pd
 import polars as pl
 import pytest
 import scipy.linalg
+import scipy.special
 import scipy.stats
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
@@ -109,6 +110,59 @@ class TestFirthLogisticRegression:
             model = FirthLogisticRegression(backend="numpy")
             model.fit(X, y)
             np.testing.assert_array_equal(model.classes_, sorted(labels))
+
+    def test_prediction_methods_include_offset(self):
+        X = np.arange(12, dtype=float).reshape(-1, 1)
+        y = np.array([0, 1] * 6)
+        offset = np.where(y == 1, 2.0, -2.0)
+        model = FirthLogisticRegression(backend="numpy").fit(X, y, offset=offset)
+
+        expected_scores = X @ model.coef_ + model.intercept_ + offset
+        expected_p1 = scipy.special.expit(expected_scores)
+        expected_proba = np.column_stack([1 - expected_p1, expected_p1])
+
+        np.testing.assert_allclose(
+            model.decision_function(X, offset=offset), expected_scores
+        )
+        np.testing.assert_allclose(
+            model.predict_proba(X, offset=offset), expected_proba
+        )
+        np.testing.assert_allclose(
+            model.predict_log_proba(X, offset=offset), np.log(expected_proba)
+        )
+        np.testing.assert_array_equal(model.predict(X, offset=offset), y)
+        assert model.score(X, y, offset=offset) == 1.0
+        assert model.score(X, y) == 0.5
+
+    def test_prediction_offset_defaults_to_zero(self):
+        X = np.array([[-1.0], [0.0], [1.0], [2.0]])
+        y = np.array([0, 0, 1, 1])
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+        zero_offset = np.zeros(X.shape[0])
+
+        np.testing.assert_allclose(
+            model.decision_function(X),
+            model.decision_function(X, offset=zero_offset),
+        )
+        np.testing.assert_allclose(
+            model.predict_proba(X),
+            model.predict_proba(X, offset=zero_offset),
+        )
+        np.testing.assert_array_equal(
+            model.predict(X),
+            model.predict(X, offset=zero_offset),
+        )
+
+    def test_prediction_offset_validation(self):
+        X = np.array([[-1.0], [0.0], [1.0], [2.0]])
+        y = np.array([0, 0, 1, 1])
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+
+        with pytest.raises(ValueError, match="Length of offset"):
+            model.predict_proba(X, offset=np.zeros(X.shape[0] - 1))
+
+        with pytest.raises(ValueError, match="one-dimensional"):
+            model.predict_proba(X, offset=np.zeros((X.shape[0], 1)))
 
     @pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
     @pytest.mark.filterwarnings(
