@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.linalg
 
 from firthmodels import detect_separation
 
@@ -73,6 +74,25 @@ class TestDetectSeparation:
 
         result = detect_separation(X, y)
         assert result.separation is True
+
+    def test_duplicate_columns_raise_rank_deficient(self):
+        X1 = np.array([[1.0], [1.0], [2.0], [2.0], [3.0], [3.0]])
+        X = np.column_stack([X1, X1])
+        y = np.array([0, 1, 0, 1, 0, 1])
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            detect_separation(X, y)
+
+    def test_constant_column_aliased_with_intercept_raises(self):
+        X = np.column_stack([np.arange(6.0), np.ones(6)])
+        y = np.array([0, 1, 0, 1, 0, 1])
+
+        with pytest.raises(scipy.linalg.LinAlgError, match="rank deficient"):
+            detect_separation(X, y)
+
+        # same design is fine without the intercept
+        result = detect_separation(X, y, fit_intercept=False)
+        assert result.separation is False
 
 
 class TestDetectSeparationDataframe:

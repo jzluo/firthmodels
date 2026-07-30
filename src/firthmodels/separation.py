@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import scipy.linalg
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import linprog
 from sklearn.utils.validation import check_X_y
@@ -131,6 +132,13 @@ def detect_separation(
         - is_finite: boolean array for each coefficient
         - directions: +1/-1/0 indicating direction of infinity
 
+    Raises
+    ------
+    scipy.linalg.LinAlgError
+        If the design matrix (including the intercept column when `fit_intercept=True`)
+        is rank deficient. Separation detection is not well-defined per coefficient for
+        collinear designs.
+
     Notes
     -----
     The algorithm solves a linear program based on Konis (2007), particularly (4.23):
@@ -216,6 +224,23 @@ def detect_separation(
             feature_names = tuple(f"x{i}" for i in range(n_features)) + ("intercept",)
 
     n_params = X_arr.shape[1]
+
+    # check rank: the |beta| > tol criterion is only valid for full-rank X
+    R, pivots = scipy.linalg.qr(X_arr, mode="r", pivoting=True)
+    r_diag = np.abs(np.diag(R))
+    rank_tol = max(X_arr.shape) * np.finfo(np.float64).eps * r_diag[0]
+    rank = int(np.sum(r_diag > rank_tol))
+    if rank < n_params:
+        if feature_names is not None:
+            names = feature_names
+        else:
+            names = tuple(f"x{i}" for i in range(n_params))
+        aliased = ", ".join(names[j] for j in sorted(pivots[rank:]))
+        raise scipy.linalg.LinAlgError(
+            f"Design matrix is rank deficient (rank {rank} < {n_params} columns; "
+            f"aliased: {aliased}). Separation detection requires full column "
+            f"rank. Drop collinear columns and retry."
+        )
 
     # Transform for LP: y_bar in {-1, +1}, X_bar = X_arr * y_bar
     y_bar = 2 * y_arr - 1
