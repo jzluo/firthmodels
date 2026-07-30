@@ -3,6 +3,7 @@ import pandas as pd
 import polars as pl
 import pytest
 import scipy.linalg
+import scipy.stats
 from scipy.special import expit as scipy_expit
 
 from firthmodels import NUMBA_AVAILABLE, FirthLogisticRegression
@@ -225,6 +226,30 @@ class TestFirthLogisticRegressionNumba:
 
         assert model.intercept_ == 0.0
         assert len(model.coef_) == n_features
+
+    def test_numba_lrt_single_parameter(self):
+        X = np.array([[0], [0], [0], [1], [1], [1]], dtype=float)
+        y = np.array([0, 0, 1, 0, 1, 1])
+        model = FirthLogisticRegression(fit_intercept=False, backend="numba").fit(X, y)
+
+        model.lrt()
+
+        workspace = _Workspace(len(y), X.shape[1])
+        null_loglik = compute_logistic_quantities(
+            X=X,
+            y=y,
+            beta=np.zeros(1),
+            sample_weight=np.ones(len(y)),
+            offset=np.zeros(len(y)),
+            workspace=workspace,
+        ).loglik
+        chi2 = 2.0 * (model.loglik_ - null_loglik)
+        np.testing.assert_allclose(
+            model.lrt_pvalues_[0], scipy.stats.chi2.sf(chi2, df=1)
+        )
+        np.testing.assert_allclose(
+            model.lrt_bse_[0], abs(model.coef_[0]) / np.sqrt(chi2)
+        )
 
     def test_numba_classes_encoded_correctly(self):
         """Handles arbitrary binary labels."""

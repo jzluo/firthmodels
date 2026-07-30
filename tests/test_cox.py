@@ -3,6 +3,7 @@ import pandas as pd
 import polars as pl
 import pytest
 import scipy.linalg
+import scipy.stats
 
 import firthmodels.cox
 from firthmodels.cox import (
@@ -97,6 +98,26 @@ class TestFirthCoxPH:
 
         assert model.converged_
         np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
+
+    def test_lrt_single_parameter(self):
+        X = np.array([[1.0], [0.0]])
+        time = np.array([1.0, 2.0])
+        event = np.array([True, False])
+        y = _structured_y(event, time)
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+
+        model.lrt()
+
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
+        workspace = _Workspace(pre.n_samples, pre.n_features)
+        null_loglik = compute_cox_quantities(np.zeros(1), pre, workspace).loglik
+        chi2 = 2.0 * (model.loglik_ - null_loglik)
+        np.testing.assert_allclose(
+            model.lrt_pvalues_[0], scipy.stats.chi2.sf(chi2, df=1)
+        )
+        np.testing.assert_allclose(
+            model.lrt_bse_[0], abs(model.coef_[0]) / np.sqrt(chi2)
+        )
 
     def test_breslow_baseline_hazard_two_individual(self):
         # Test Breslow estimator for two-individual example.
