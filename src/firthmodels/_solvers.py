@@ -57,7 +57,7 @@ def newton_raphson(
         beta = beta_init.astype(np.float64, copy=True)
     q = compute_quantities(beta)
 
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         # solve for step: delta = (X'WX)^(-1) @ U*
         try:
             L, info = dpotrf(q.fisher_info, lower=1, overwrite_a=0)
@@ -83,6 +83,9 @@ def newton_raphson(
                 n_iter=iteration,
                 converged=True,
             )
+
+        if iteration == max_iter:
+            break
 
         # clip to max_stepsize
         if max_delta > max_step:

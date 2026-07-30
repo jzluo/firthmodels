@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -5,6 +7,7 @@ import pytest
 import scipy.linalg
 import scipy.stats
 from scipy.special import expit as scipy_expit
+from sklearn.exceptions import ConvergenceWarning
 
 from firthmodels import NUMBA_AVAILABLE, FirthLogisticRegression
 from firthmodels._solvers import newton_raphson
@@ -249,6 +252,42 @@ class TestFirthLogisticRegressionNumba:
         )
         np.testing.assert_allclose(
             model.lrt_bse_[0], abs(model.coef_[0]) / np.sqrt(chi2)
+        )
+
+    def test_numba_converged_on_final_step(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numba").fit(X, y)
+        assert model.converged_ and model.n_iter_ >= 2
+
+        # max_iter equal to the steps needed certifies convergence on the
+        # final permitted step
+        refit = FirthLogisticRegression(max_iter=model.n_iter_, backend="numba")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            refit.fit(X, y)
+        assert refit.converged_
+        assert refit.n_iter_ == model.n_iter_
+
+        short = FirthLogisticRegression(max_iter=model.n_iter_ - 1, backend="numba")
+        with pytest.warns(ConvergenceWarning):
+            short.fit(X, y)
+        assert not short.converged_
+
+        X_design = np.column_stack([X, np.ones(len(y))])
+        beta = np.concatenate([short.coef_, [short.intercept_]])
+        workspace = _Workspace(len(y), X_design.shape[1])
+        q = compute_logistic_quantities(
+            X=X_design,
+            y=y,
+            beta=beta,
+            sample_weight=np.ones(len(y)),
+            offset=np.zeros(len(y)),
+            workspace=workspace,
+        )
+        delta = np.linalg.solve(q.fisher_info, q.modified_score)
+        assert (
+            np.abs(q.modified_score).max() >= short.gtol
+            or np.abs(delta).max() >= short.xtol
         )
 
     def test_numba_classes_encoded_correctly(self):

@@ -518,7 +518,7 @@ def newton_raphson_cox(
     if status != 0:
         return beta, loglik, fisher_info, 0, status
 
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         fisher_work[:] = fisher_info
 
         info = dpotrf(fisher_work)
@@ -536,6 +536,9 @@ def newton_raphson_cox(
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
             return beta, loglik, fisher_info, iteration, _STATUS_CONVERGED
+
+        if iteration == max_iter:
+            break
 
         if max_delta > max_step:
             scale = max_step / max_delta
@@ -705,7 +708,7 @@ def constrained_lrt_1df_cox(
     if free_k == 0:
         return loglik, 0, _STATUS_CONVERGED
 
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         for i in range(free_k):
             score_free[i] = modified_score[free_idx[i]]
 
@@ -735,6 +738,9 @@ def constrained_lrt_1df_cox(
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
             return loglik, iteration, _STATUS_CONVERGED
+
+        if iteration == max_iter:
+            break
 
         if max_delta > max_step:
             scale = max_step / max_delta
