@@ -7,6 +7,7 @@ import pytest
 import scipy.linalg
 import scipy.special
 import scipy.stats
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
 import firthmodels.logistic
@@ -238,6 +239,42 @@ class TestFirthLogisticRegression:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             model.fit(X, y)
+
+    def test_converged_on_final_step(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+        assert model.converged_ and model.n_iter_ >= 2
+
+        # max_iter equal to the steps needed certifies convergence on the
+        # final permitted step
+        refit = FirthLogisticRegression(max_iter=model.n_iter_, backend="numpy")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            refit.fit(X, y)
+        assert refit.converged_
+        assert refit.n_iter_ == model.n_iter_
+
+        short = FirthLogisticRegression(max_iter=model.n_iter_ - 1, backend="numpy")
+        with pytest.warns(ConvergenceWarning):
+            short.fit(X, y)
+        assert not short.converged_
+
+        X_design = np.column_stack([X, np.ones(len(y))])
+        beta = np.concatenate([short.coef_, [short.intercept_]])
+        workspace = firthmodels.logistic._Workspace(len(y), X_design.shape[1])
+        q = firthmodels.logistic.compute_logistic_quantities(
+            X=X_design,
+            y=y,
+            beta=beta,
+            sample_weight=np.ones(len(y)),
+            offset=np.zeros(len(y)),
+            workspace=workspace,
+        )
+        delta = np.linalg.solve(q.fisher_info, q.modified_score)
+        assert (
+            np.abs(q.modified_score).max() >= short.gtol
+            or np.abs(delta).max() >= short.xtol
+        )
 
     def test_lrt_with_string_feature_names(self, separation_data_df):
         X, y = separation_data_df

@@ -299,7 +299,7 @@ def newton_raphson_logistic(
     if status != 0:
         return beta, loglik, fisher_info_aug, 0, status
 
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         fisher_info[:, :] = fisher_info_aug
 
         info = dpotrf(fisher_info)
@@ -321,6 +321,9 @@ def newton_raphson_logistic(
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
             return beta, loglik, fisher_info_aug, iteration, _STATUS_CONVERGED
+
+        if iteration == max_iter:
+            break
 
         if max_delta > max_step:
             scale = max_step / max_delta
@@ -442,7 +445,7 @@ def constrained_lrt_1df_logistic(
     if free_k == 0:
         return loglik, 0, _STATUS_CONVERGED
 
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         for i in range(free_k):
             score_free[i] = modified_score[free_idx[i]]
 
@@ -474,6 +477,9 @@ def constrained_lrt_1df_logistic(
         max_delta = max_abs(delta)
         if max_score < gtol and max_delta < xtol:
             return loglik, iteration, _STATUS_CONVERGED
+
+        if iteration == max_iter:
+            break
 
         if max_delta > max_step:
             scale = max_step / max_delta
@@ -622,7 +628,7 @@ def profile_ci_bound_logistic(
     temp = np.empty(k, dtype=np.float64)
 
     # Appendix steps 4-9: Modified Newton-Raphson
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
         loglik, status = compute_logistic_quantities(
             X, y, theta, sample_weight, offset, workspace, penalty_weight
@@ -641,6 +647,9 @@ def profile_ci_bound_logistic(
         # |scores| of the nuisance parameters.
         if max_abs(F) <= tol:
             return theta[idx], _STATUS_CONVERGED, iteration
+
+        if iteration == max_iter:
+            break
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         for i in range(k):
