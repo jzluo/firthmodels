@@ -15,6 +15,7 @@ from scipy.linalg.lapack import dgeqp3, dorgqr, dpotrf, dpotrs
 from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.metrics import accuracy_score
 from sklearn.utils._tags import ClassifierTags, Tags
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import (
@@ -195,9 +196,12 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         y : array-like of shape (n_samples,)
             Target labels.
         sample_weight : array-like of shape (n_samples,), default=None
-            Array of weights that are assigned to individual samples. If not provided, then each sample is given unit weight.
+            Array of weights that are assigned to individual samples. If not provided,
+            then each sample is given unit weight.
         offset : array-like of shape (n_samples,), default=None
-            Fixed offset added to linear predictor.
+            Fixed offset added to linear predictor. Offsets aren't stored for
+            prediction, and need to be passed to the prediction methods if needed.
+
 
         Returns
         -------
@@ -217,20 +221,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         ):
             raise ValueError("Need at least one positive-weight sample in each class.")
 
-        if offset is None:
-            offset = np.zeros(X.shape[0], dtype=np.float64)
-        else:
-            offset = cast(
-                NDArray[np.float64],
-                check_array(
-                    offset, ensure_2d=False, dtype=np.float64, input_name="offset"
-                ),
-            )
-            if offset.shape[0] != X.shape[0]:
-                raise ValueError(
-                    f"Length of offset ({offset.shape[0]}) does not match "
-                    f"number of samples ({X.shape[0]})"
-                )
+        offset = self._validate_offset(offset, X.shape[0])
 
         if self.fit_intercept:
             X = np.column_stack([X, np.ones(X.shape[0])])
@@ -723,36 +714,136 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
     def decision_function(
         self,
         X: ArrayLike,
+        offset: ArrayLike | None = None,
     ) -> NDArray[np.float64]:
-        """Return linear predictor."""
+        """
+        Return the linear predictor.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to the linear predictor. If not provided, no
+            offset is applied.
+
+        Returns
+        -------
+        ndarray of shape (n_samples,)
+            Linear predictor ``X @ coef_ + intercept_ + offset``.
+        """
         check_is_fitted(self)
         X = validate_data(self, X, dtype=np.float64, reset=False)
         X = cast(NDArray[np.float64], X)  # for mypy
-        return X @ self.coef_ + self.intercept_
+        offset_arr = self._validate_offset(offset, X.shape[0])
+        return X @ self.coef_ + self.intercept_ + offset_arr
 
     def predict_proba(
         self,
         X: ArrayLike,
+        offset: ArrayLike | None = None,
     ) -> NDArray[np.float64]:
-        """Return class probabilities."""
-        scores = self.decision_function(X)
+        """
+        Return class probabilities.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to the linear predictor. If not provided, no
+            offset is applied.
+
+        Returns
+        -------
+        ndarray of shape (n_samples, 2)
+            Probability estimates for the two classes.
+        """
+        scores = self.decision_function(X, offset=offset)
         p1 = expit(scores)
         return np.column_stack([1 - p1, p1])
 
     def predict(
         self,
         X: ArrayLike,
+        offset: ArrayLike | None = None,
     ) -> NDArray[np.int_]:
-        """Return predicted class labels."""
-        proba = self.predict_proba(X)
+        """
+        Return predicted class labels.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to the linear predictor. If not provided, no
+            offset is applied.
+
+        Returns
+        -------
+        ndarray of shape (n_samples,)
+            Predicted class labels.
+        """
+        proba = self.predict_proba(X, offset=offset)
         return self.classes_[np.argmax(proba, axis=1)]
 
     def predict_log_proba(
         self,
         X: ArrayLike,
+        offset: ArrayLike | None = None,
     ) -> NDArray[np.float64]:
-        """Return log class probabilities"""
-        return np.log(self.predict_proba(X))
+        """
+        Return log class probabilities.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Feature matrix.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to the linear predictor. If not provided, no
+            offset is applied.
+
+        Returns
+        -------
+        ndarray of shape (n_samples, 2)
+            Log probability estimates for the two classes.
+        """
+        return np.log(self.predict_proba(X, offset=offset))
+
+    def score(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        sample_weight: ArrayLike | None = None,
+        offset: ArrayLike | None = None,
+    ) -> float:
+        """
+        Return the mean accuracy on the given test data and labels.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Test samples.
+        y : array-like of shape (n_samples,)
+            True labels for ``X``.
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights.
+        offset : array-like of shape (n_samples,), default=None
+            Fixed offset added to the linear predictor. If not provided, no
+            offset is applied.
+
+        Returns
+        -------
+        float
+            Mean accuracy of the predictions.
+        """
+        return float(
+            accuracy_score(
+                y,
+                self.predict(X, offset=offset),
+                sample_weight=sample_weight,
+            )
+        )
 
     def _validate_input(
         self, X: ArrayLike, y: ArrayLike
@@ -805,6 +896,27 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         X = cast(NDArray[np.float64], X)  # for mypy
         y = cast(NDArray[np.float64], y)
         return X, y
+
+    @staticmethod
+    def _validate_offset(
+        offset: ArrayLike | None, n_samples: int
+    ) -> NDArray[np.float64]:
+        """Validate an offset vector, defaulting to zeros."""
+        if offset is None:
+            return np.zeros(n_samples, dtype=np.float64)
+
+        offset_arr = cast(
+            NDArray[np.float64],
+            check_array(offset, ensure_2d=False, dtype=np.float64, input_name="offset"),
+        )
+        if offset_arr.ndim != 1:
+            raise ValueError("offset must be a one-dimensional array")
+        if offset_arr.shape[0] != n_samples:
+            raise ValueError(
+                f"Length of offset ({offset_arr.shape[0]}) does not match "
+                f"number of samples ({n_samples})"
+            )
+        return offset_arr
 
 
 @dataclass
