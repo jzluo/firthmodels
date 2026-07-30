@@ -933,7 +933,13 @@ def compute_logistic_quantities(
         if info != 0:
             raise scipy.linalg.LinAlgError("dpotrf failed")
 
-        np.log(L.diagonal(), out=ws.temp_k)
+        # check pivots, dpotrf can return info=0 on a singular matrix on Accelerate
+        L_diag = L.diagonal()
+        chol_tol = np.sqrt(max(n, k) * np.finfo(np.float64).eps) * L_diag.max()
+        if L_diag.min() <= chol_tol:
+            raise scipy.linalg.LinAlgError("Cholesky pivot below tolerance")
+
+        np.log(L_diag, out=ws.temp_k)
         logdet = 2.0 * ws.temp_k.sum()
 
         inv_fisher_info, info = dpotrs(L, ws.eye_k, lower=1)
