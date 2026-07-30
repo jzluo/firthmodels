@@ -439,6 +439,8 @@ def constrained_lrt_1df_logistic(
     )
     if status != 0:
         return loglik, 0, status
+    if free_k == 0:
+        return loglik, 0, _STATUS_CONVERGED
 
     for iteration in range(1, max_iter + 1):
         for i in range(free_k):

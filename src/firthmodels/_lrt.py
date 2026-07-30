@@ -100,18 +100,24 @@ def constrained_lrt_1df(
             fisher_info=q.fisher_info[ix_grid],
         )
 
-    reduced_result = newton_raphson(
-        compute_quantities=constrained_quantities,
-        n_features=k - 1,
-        max_iter=max_iter,
-        max_step=max_step,
-        max_halfstep=max_halfstep,
-        gtol=gtol,
-        xtol=xtol,
-        beta_init=beta_init_free,
-    )
+    if k == 1:
+        # No nuisance parameters remain, so the constrained model is specified by
+        # beta[idx] = 0 and there is nothing to optimize
+        loglik_constrained = compute_quantities_full(beta_full).loglik
+    else:
+        reduced_result = newton_raphson(
+            compute_quantities=constrained_quantities,
+            n_features=k - 1,
+            max_iter=max_iter,
+            max_step=max_step,
+            max_halfstep=max_halfstep,
+            gtol=gtol,
+            xtol=xtol,
+            beta_init=beta_init_free,
+        )
+        loglik_constrained = reduced_result.loglik
 
-    chi2 = max(0.0, 2.0 * (loglik_full - reduced_result.loglik))
+    chi2 = max(0.0, 2.0 * (loglik_full - loglik_constrained))
     pval = scipy.stats.chi2.sf(chi2, df=1)
 
     # back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
