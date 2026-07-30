@@ -918,7 +918,7 @@ def profile_ci_bound_cox(
     temp = np.empty(k, dtype=np.float64)
 
     # Appendix steps 4-9: Modified Newton-Raphson
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
         loglik, status = compute_cox_quantities(
             X=X,
@@ -949,6 +949,9 @@ def profile_ci_bound_cox(
         # |scores| of the nuisance parameters.
         if max_abs(F) <= tol:
             return theta[idx], _STATUS_CONVERGED, iteration
+
+        if iteration == max_iter:
+            break
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         for i in range(k):

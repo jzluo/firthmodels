@@ -112,7 +112,7 @@ def profile_ci_bound(
     theta = theta + h * tangent
 
     # Appendix steps 4-9: Modified Newton-Raphson
-    for iteration in range(1, max_iter + 1):
+    for iteration in range(max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
         q = compute_quantities_full(theta)
 
@@ -130,6 +130,9 @@ def profile_ci_bound(
                 converged=True,
                 n_iter=iteration,
             )
+
+        if iteration == max_iter:
+            break
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         D = -q.fisher_info
