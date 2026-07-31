@@ -1,11 +1,15 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
 import scipy.linalg
 import scipy.stats
+from sklearn.exceptions import ConvergenceWarning
 
 import firthmodels.cox
+from firthmodels._lrt import LRTResult
 from firthmodels.cox import (
     FirthCoxPH,
     _concordance_index,
@@ -268,12 +272,17 @@ class TestFirthCoxPH:
         X, time, event = cox_separation_data
         y = _structured_y(event, time)
         model = FirthCoxPH(backend="numpy").fit(X, y)
-        captured = {}
+        captured = {"calls": 0}
 
         def fake_constrained_lrt_1df(*, beta_init_free, **kwargs):
+            captured["calls"] += 1
             captured["beta_init_free"] = beta_init_free
-            return firthmodels.cox.LRTResult(
-                chi2=0.0, pvalue=1.0, bse_backcorrected=1.0
+            return LRTResult(
+                chi2=0.0,
+                pvalue=1.0,
+                bse_backcorrected=1.0,
+                valid=True,
+                n_iter=0,
             )
 
         monkeypatch.setattr(
@@ -281,7 +290,93 @@ class TestFirthCoxPH:
         )
 
         model.lrt(0, warm_start=False)
+        model.lrt(0, warm_start=False)
         assert captured["beta_init_free"] is None
+        assert captured["calls"] == 1
+
+    def test_failed_lrt_is_nan_and_can_retry(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+        model.max_iter = 1
+
+        with pytest.warns(ConvergenceWarning, match="LRT for parameter 0") as caught:
+            model.lrt(0, warm_start=False)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
+        model.max_iter = 50
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.lrt(0, warm_start=False)
+
+        assert np.isfinite(model.lrt_pvalues_[0])
+        assert np.isfinite(model.lrt_bse_[0])
+
+    def test_nonfinite_full_loglik_skips_constrained_lrt(
+        self, cox_separation_data, monkeypatch
+    ):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+        model.loglik_ = np.nan
+        calls = 0
+
+        def fake_constrained_lrt_1df(**kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("constrained LRT should not run")
+
+        monkeypatch.setattr(
+            "firthmodels.cox.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        with pytest.warns(
+            ConvergenceWarning, match="full-model penalized log-likelihood"
+        ) as caught:
+            model.lrt([0, 1])
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert calls == 0
+        assert np.isnan(model.lrt_pvalues_[[0, 1]]).all()
+        assert np.isnan(model.lrt_bse_[[0, 1]]).all()
+
+    def test_nonconverged_full_fit_skips_constrained_lrt(self, monkeypatch):
+        X = np.array([[1.0], [0.0]])
+        y = _structured_y(
+            event=np.array([True, False]),
+            time=np.array([1.0, 2.0]),
+        )
+        with pytest.warns(ConvergenceWarning, match="Maximum number of iterations"):
+            model = FirthCoxPH(backend="numpy", max_iter=1).fit(X, y)
+
+        assert not model.converged_
+        assert np.isfinite(model.loglik_)
+        calls = 0
+
+        def fake_constrained_lrt_1df(**kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("constrained LRT should not run")
+
+        monkeypatch.setattr(
+            "firthmodels.cox.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        with pytest.warns(
+            ConvergenceWarning, match="full-model fit did not converge"
+        ) as caught:
+            model.lrt(0)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert calls == 0
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
 
     def test_dpstrf_fallback_in_compute_cox_quantities(
         self, cox_separation_data, monkeypatch

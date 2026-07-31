@@ -34,7 +34,7 @@ if NUMBA_AVAILABLE:
         profile_ci_bound_cox,
     )
 
-from firthmodels._lrt import LRTResult, constrained_lrt_1df
+from firthmodels._lrt import constrained_lrt_1df, lrt_result_from_loglik
 from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
 from firthmodels._utils import FirthResult, resolve_feature_indices
@@ -84,10 +84,10 @@ class FirthCoxPH(BaseEstimator):
         Wald p-values.
     lrt_pvalues_ : ndarray of shape (n_features,)
         Likelihood ratio test p-values. Computed by `lrt()`. Values are
-        NaN until computed.
+        NaN until computed or if the constrained fit fails.
     lrt_bse_ : ndarray of shape (n_features,)
         Back-corrected standard errors from LRT. Computed by `lrt()`.
-        Values are NaN until computed.
+        Values are NaN until computed or if the constrained fit fails.
     unique_times_ : ndarray of shape (n_events,)
         Unique event times in ascending order.
     cum_baseline_hazard_ : ndarray of shape (n_events,)
@@ -330,6 +330,19 @@ class FirthCoxPH(BaseEstimator):
         check_is_fitted(self)
         indices = self._resolve_feature_indices(features)
 
+        if indices and (not self.converged_ or not math.isfinite(self.loglik_)):
+            reason = (
+                "the full-model fit did not converge"
+                if not self.converged_
+                else "the full-model penalized log-likelihood is non-finite"
+            )
+            warnings.warn(
+                f"LRT inference was not computed because {reason}.",
+                ConvergenceWarning,
+                stacklevel=2,
+            )
+            return self
+
         # compute LRT
         for idx in indices:
             if np.isnan(self.lrt_pvalues_[idx]):
@@ -398,31 +411,26 @@ class FirthCoxPH(BaseEstimator):
                 penalty_weight=self.penalty_weight,
             )
 
-            if status == _STATUS_STEP_HALVING_FAILED:
-                warnings.warn(
-                    "Step-halving failed to converge.",
-                    ConvergenceWarning,
-                    stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
-                )
-            elif status == _STATUS_MAX_ITER:
-                warnings.warn(
-                    "Maximum number of iterations reached without convergence.",
-                    ConvergenceWarning,
-                    stacklevel=3,
-                )
-            elif status == _STATUS_RANK_DEFICIENT:
+            if status == _STATUS_RANK_DEFICIENT:
                 raise scipy.linalg.LinAlgError("Fisher information is rank deficient.")
             elif status == _STATUS_LINALG_FAIL:
                 raise scipy.linalg.LinAlgError(
                     "dpstrf failed - Fisher information is not PSD."
                 )
+            failure_reason: Literal["step_halving", "max_iter"] | None = None
+            if status == _STATUS_STEP_HALVING_FAILED:
+                failure_reason = "step_halving"
+            elif status == _STATUS_MAX_ITER:
+                failure_reason = "max_iter"
 
-            chi2 = max(0.0, 2.0 * (self.loglik_ - constrained_loglik))
-            pval = scipy.stats.chi2.sf(chi2, df=1)
-
-            # back-corrected SE: |beta|/sqrt(chi2), ensures (beta/SE)^2 = chi2
-            bse = abs(self.coef_[idx]) / math.sqrt(chi2) if chi2 > 0 else math.inf
-            result = LRTResult(chi2=chi2, pvalue=pval, bse_backcorrected=bse)
+            result = lrt_result_from_loglik(
+                beta=self.coef_[idx],
+                loglik_full=self.loglik_,
+                loglik_constrained=constrained_loglik,
+                converged=(status == _STATUS_CONVERGED),
+                n_iter=n_iter,
+                failure_reason=failure_reason,
+            )
 
         else:
 
@@ -445,6 +453,15 @@ class FirthCoxPH(BaseEstimator):
                 max_halfstep=self.max_halfstep,
                 gtol=self.gtol,
                 xtol=self.xtol,
+            )
+
+        if not result.valid:
+            warnings.warn(
+                f"LRT for parameter {idx} was not computed "
+                f"({result.failure_reason}); p-value and back-corrected "
+                "standard error remain NaN.",
+                ConvergenceWarning,
+                stacklevel=3,  # caller -> lrt() -> _compute_single_lrt
             )
 
         self.lrt_pvalues_[idx] = result.pvalue

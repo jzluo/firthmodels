@@ -12,6 +12,7 @@ from sklearn.utils.estimator_checks import estimator_checks_generator
 
 import firthmodels.logistic
 from firthmodels import FirthLogisticRegression
+from firthmodels._lrt import LRTResult
 
 
 class TestFirthLogisticRegression:
@@ -215,12 +216,17 @@ class TestFirthLogisticRegression:
     def test_lrt_warm_start_false_uses_zero_init(self, separation_data, monkeypatch):
         X, y = separation_data
         model = FirthLogisticRegression(backend="numpy").fit(X, y)
-        captured = {}
+        captured = {"calls": 0}
 
         def fake_constrained_lrt_1df(*, beta_init_free, **kwargs):
+            captured["calls"] += 1
             captured["beta_init_free"] = beta_init_free
-            return firthmodels.logistic.LRTResult(
-                chi2=0.0, pvalue=1.0, bse_backcorrected=1.0
+            return LRTResult(
+                chi2=0.0,
+                pvalue=1.0,
+                bse_backcorrected=1.0,
+                valid=True,
+                n_iter=0,
             )
 
         monkeypatch.setattr(
@@ -228,7 +234,118 @@ class TestFirthLogisticRegression:
         )
 
         model.lrt(0, warm_start=False)
+        model.lrt(0, warm_start=False)
         assert captured["beta_init_free"] is None
+        assert captured["calls"] == 1
+
+    def test_failed_lrt_is_nan_and_can_retry(self, separation_data):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+        model.max_iter = 1
+
+        with pytest.warns(ConvergenceWarning, match="LRT for parameter 0") as caught:
+            model.lrt(0, warm_start=False)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
+        model.max_iter = 25
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.lrt(0, warm_start=False)
+
+        assert np.isfinite(model.lrt_pvalues_[0])
+        assert np.isfinite(model.lrt_bse_[0])
+
+    def test_nonfinite_full_loglik_skips_constrained_lrt(
+        self, separation_data, monkeypatch
+    ):
+        X, y = separation_data
+        model = FirthLogisticRegression(backend="numpy").fit(X, y)
+        model.loglik_ = np.nan
+        calls = 0
+
+        def fake_constrained_lrt_1df(**kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("constrained LRT should not run")
+
+        monkeypatch.setattr(
+            "firthmodels.logistic.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        with pytest.warns(
+            ConvergenceWarning, match="full-model penalized log-likelihood"
+        ) as caught:
+            model.lrt([0, 1])
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert calls == 0
+        assert np.isnan(model.lrt_pvalues_[[0, 1]]).all()
+        assert np.isnan(model.lrt_bse_[[0, 1]]).all()
+
+    def test_nonconverged_full_fit_skips_constrained_lrt(self, monkeypatch):
+        X = np.array([[0], [0], [0], [1], [1], [1]], dtype=float)
+        y = np.array([0, 0, 1, 0, 1, 1])
+        with pytest.warns(ConvergenceWarning, match="Maximum number of iterations"):
+            model = FirthLogisticRegression(
+                fit_intercept=False, backend="numpy", max_iter=1
+            ).fit(X, y)
+
+        assert not model.converged_
+        assert np.isfinite(model.loglik_)
+        calls = 0
+
+        def fake_constrained_lrt_1df(**kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("constrained LRT should not run")
+
+        monkeypatch.setattr(
+            "firthmodels.logistic.constrained_lrt_1df", fake_constrained_lrt_1df
+        )
+
+        with pytest.warns(
+            ConvergenceWarning, match="full-model fit did not converge"
+        ) as caught:
+            model.lrt(0)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert calls == 0
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
+    def test_constrained_lrt_step_halving_failure_withholds_inference(self):
+        def compute_quantities(beta):
+            return firthmodels.logistic.LogisticQuantities(
+                loglik=-abs(beta[1]),
+                modified_score=np.array([0.0, 1.0]),
+                fisher_info=np.eye(2),
+            )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            result = firthmodels.logistic.constrained_lrt_1df(
+                idx=0,
+                beta_hat_full=np.array([1.0, 0.0]),
+                loglik_full=1.0,
+                compute_quantities_full=compute_quantities,
+                max_iter=5,
+                max_step=5.0,
+                max_halfstep=1,
+                gtol=1e-4,
+                xtol=1e-4,
+            )
+
+        assert not result.valid
+        assert result.failure_reason == "step_halving"
+        assert np.isnan(result.chi2)
+        assert np.isnan(result.pvalue)
+        assert np.isnan(result.bse_backcorrected)
 
     def test_no_warning_when_halfstep_disabled(self):
         """max_halfstep=0 should not produce step-halving warnings."""

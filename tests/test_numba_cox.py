@@ -1,9 +1,12 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
 import scipy.linalg
 import scipy.stats
+from sklearn.exceptions import ConvergenceWarning
 
 from firthmodels import NUMBA_AVAILABLE
 
@@ -105,6 +108,28 @@ class TestFirthCoxPH:
         np.testing.assert_allclose(
             model.lrt_bse_[0], abs(model.coef_[0]) / np.sqrt(chi2)
         )
+
+    def test_failed_lrt_is_nan_and_can_retry(self, cox_separation_data):
+        X, time, event = cox_separation_data
+        y = _structured_y(event, time)
+        model = FirthCoxPH(backend="numba").fit(X, y)
+        model.max_iter = 1
+
+        with pytest.warns(ConvergenceWarning, match="LRT for parameter 0") as caught:
+            model.lrt(0, warm_start=False)
+
+        assert len(caught) == 1
+        assert caught[0].filename == __file__
+        assert np.isnan(model.lrt_pvalues_[0])
+        assert np.isnan(model.lrt_bse_[0])
+
+        model.max_iter = 50
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            model.lrt(0, warm_start=False)
+
+        assert np.isfinite(model.lrt_pvalues_[0])
+        assert np.isfinite(model.lrt_bse_[0])
 
     def test_breslow_baseline_hazard_two_individual(self):
         # Test Breslow estimator for two-individual example.
