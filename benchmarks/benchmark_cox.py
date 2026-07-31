@@ -92,7 +92,7 @@ def make_benchmark_data(
     T = -np.log(U) / (baseline_hazard * np.exp(eta))
 
     # Censoring to achieve target event rate
-    censor_quantile = 1 - event_rate
+    censor_quantile = event_rate
     censor_time = np.quantile(T, censor_quantile)
 
     time = np.minimum(T, censor_time)
