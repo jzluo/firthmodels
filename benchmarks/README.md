@@ -27,7 +27,7 @@ for Firth-penalized logistic regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.7.2 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.8.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **brglm2** | 1.0.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 | **logistf** | 1.26.1 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
@@ -56,16 +56,16 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | brglm2<br>(AS-mean) | brglm2<br>(MPL_Jeffreys) | logistf |
 |--:|------:|------:|------------:|-------------:|--------:|
-|   5 | 0.5 | 1.4 | 4.2 | 4.2 | 2.0 |
-|  10 | 1.2 | 1.9 | 7.9 | 7.2 | 4.3 |
-|  15 | 1.2 | 1.9 | 8.2 | 8.2 | 7.6 |
-|  20 | 1.5 | 2.3 | 9.3 | 9.4 | 15.7 |
-|  25 | 1.8 | 2.7 | 11.7 | 11.7 | 24.2 |
-|  30 | 2.1 | 2.9 | 12.6 | 12.9 | 30.2 |
-|  35 | 2.3 | 3.4 | 14.9 | 14.8 | 42.0 |
-|  40 | 2.8 | 3.8 | 16.9 | 16.8 | 52.7 |
-|  45 | 3.9 | 4.6 | 18.6 | 19.8 | 70.3 |
-|  50 | 4.5 | 5.8 | 23.9 | 24.2 | 86.0 |
+|   5 | 0.5 | 1.4 | 4.2 | 4.3 | 2.1 |
+|  10 | 1.1 | 1.8 | 7.5 | 7.4 | 4.2 |
+|  15 | 1.2 | 2.0 | 8.4 | 8.5 | 6.8 |
+|  20 | 1.4 | 2.2 | 9.6 | 9.7 | 15.1 |
+|  25 | 1.7 | 2.7 | 12.0 | 12.0 | 23.2 |
+|  30 | 2.0 | 2.8 | 13.0 | 13.0 | 28.8 |
+|  35 | 2.1 | 3.2 | 15.5 | 15.4 | 40.5 |
+|  40 | 2.6 | 3.7 | 17.3 | 17.5 | 51.1 |
+|  45 | 3.3 | 4.6 | 19.1 | 19.3 | 67.9 |
+|  50 | 4.1 | 5.4 | 24.3 | 24.5 | 83.5 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -73,16 +73,16 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | logistf |
 |--:|------:|------:|--------:|
-|   5 | 4.9 | 10.6 | 13.6 |
-|  10 | 21.0 | 43.1 | 72.1 |
-|  15 | 32.6 | 68.1 | 157.6 |
-|  20 | 59.6 | 109.7 | 452.6 |
-|  25 | 98.5 | 175.4 | 931.5 |
-|  30 | 131.6 | 226.1 | 1350.4 |
-|  35 | 184.0 | 312.7 | 2322.4 |
-|  40 | 237.0 | 379.7 | 3334.4 |
-|  45 | 358.4 | 519.7 | 4692.8 |
-|  50 | 490.5 | 700.5 | 6501.0 |
+|   5 | 4.7 | 11.0 | 13.8 |
+|  10 | 19.4 | 40.0 | 81.4 |
+|  15 | 29.2 | 63.8 | 156.9 |
+|  20 | 45.8 | 89.8 | 438.5 |
+|  25 | 77.1 | 141.8 | 903.0 |
+|  30 | 110.6 | 183.6 | 1307.5 |
+|  35 | 138.3 | 236.3 | 2209.1 |
+|  40 | 199.7 | 314.7 | 3188.7 |
+|  45 | 266.0 | 405.1 | 4574.0 |
+|  50 | 370.9 | 532.9 | 6282.8 |
 
 
 ---
@@ -97,7 +97,7 @@ for Firth-penalized Cox proportional hazards regression.
 
 | Library | Version | BLAS |
 |---------|---------|------|
-| **firthmodels** | 0.7.2 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
+| **firthmodels** | 0.8.0 | /usr/lib/x86_64-linux-gnu/openblas-pthread/ (openblas 0.3.26) |
 | **coxphf** | 1.13.4 | /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 |
 
 ### Configuration
@@ -124,12 +124,12 @@ Time to fit the model and perform Wald inference. Values are minimum time across
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 1.8 | 4.3 | 3.5 |
-|  10 | 1.8 | 5.5 | 22.2 |
-|  15 | 2.2 | 7.1 | 49.9 |
-|  20 | 4.5 | 14.7 | 113.9 |
-|  25 | 5.9 | 35.9 | 225.5 |
-|  30 | 8.4 | 69.4 | 391.0 |
+|   5 | 1.1 | 1.8 | 4.3 |
+|  10 | 0.7 | 2.5 | 16.8 |
+|  15 | 0.9 | 3.6 | 49.8 |
+|  20 | 1.9 | 8.0 | 137.7 |
+|  25 | 2.6 | 11.1 | 268.9 |
+|  30 | 3.3 | 14.4 | 464.5 |
 
 #### Full Workflow (Fit + LRT + Profile CI)
 
@@ -137,12 +137,12 @@ Time to fit the model, compute penalized likelihood ratio test p-values for all 
 
 | k | firthmodels<br>(numba) | firthmodels<br>(numpy) | coxphf |
 |--:|------:|------:|-------:|
-|   5 | 4.4 | 18.2 | 23.8 |
-|  10 | 11.8 | 58.9 | 364.4 |
-|  15 | 32.9 | 159.1 | 1693.6 |
-|  20 | 105.3 | 473.2 | 5675.5 |
-|  25 | 173.4 | 2240.4 | 16062.0 |
-|  30 | 265.9 | 3846.8 | 34707.3 |
+|   5 | 2.6 | 12.9 | 26.9 |
+|  10 | 7.6 | 45.6 | 360.4 |
+|  15 | 18.7 | 115.3 | 2019.4 |
+|  20 | 52.4 | 294.7 | 6447.7 |
+|  25 | 100.1 | 535.3 | 16706.7 |
+|  30 | 148.2 | 870.7 | 34470.1 |
 
 
 ---
