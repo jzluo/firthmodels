@@ -249,7 +249,7 @@ def compute_logistic_quantities(
     return loglik, 0  # status 0 meaning success
 
 
-@njit(fastmath=True, cache=True)
+@njit(fastmath=True, cache=True, nogil=True)
 def newton_raphson_logistic(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
@@ -378,7 +378,7 @@ def newton_raphson_logistic(
     return beta, loglik, fisher_info_aug, iteration, _STATUS_MAX_ITER
 
 
-@njit(fastmath=True, cache=True)
+@njit(fastmath=True, cache=True, nogil=True)
 def constrained_lrt_1df_logistic(
     X: NDArray[np.float64],
     y: NDArray[np.float64],
@@ -531,7 +531,7 @@ def constrained_lrt_1df_logistic(
     return loglik, max_iter, _STATUS_MAX_ITER
 
 
-@njit(fastmath=True, cache=True)
+@njit(fastmath=True, cache=True, nogil=True)
 def profile_ci_bound_logistic(
     X: NDArray[np.float64],
     y: NDArray[np.float64],

@@ -45,7 +45,7 @@ def max_abs(vec: NDArray[np.float64]) -> float:
     return max_val
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def precompute_cox(
     X: NDArray[np.float64],
     time: NDArray[np.float64],
@@ -447,7 +447,7 @@ def compute_cox_quantities(
     return loglik, 0  # status success
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def newton_raphson_cox(
     X: NDArray[np.float64],
     block_ends: NDArray[np.intp],
@@ -618,7 +618,7 @@ def newton_raphson_cox(
     return beta, loglik, fisher_info, max_iter, _STATUS_MAX_ITER
 
 
-@njit(fastmath=True, cache=True)
+@njit(fastmath=True, cache=True, nogil=True)
 def constrained_lrt_1df_cox(
     X: NDArray[np.float64],
     block_ends: NDArray[np.intp],
@@ -809,7 +809,7 @@ def constrained_lrt_1df_cox(
     return loglik, max_iter, _STATUS_MAX_ITER
 
 
-@njit(fastmath=True, cache=True)
+@njit(fastmath=True, cache=True, nogil=True)
 def profile_ci_bound_cox(
     X: NDArray[np.float64],
     block_ends: NDArray[np.intp],
@@ -1060,7 +1060,7 @@ def profile_ci_bound_cox(
     return theta[idx], _STATUS_MAX_ITER, max_iter
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def concordance_index(
     event: NDArray[np.bool_],
     time: NDArray[np.float64],

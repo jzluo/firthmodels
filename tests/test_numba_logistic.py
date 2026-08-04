@@ -1,4 +1,5 @@
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -436,3 +437,19 @@ class TestFirthLogisticRegressionNumba:
         np.testing.assert_allclose(model.intercept_, expected_intercept, rtol=1e-5)
         np.testing.assert_allclose(model.loglik_, expected_loglik, rtol=1e-5)
         np.testing.assert_allclose(model.bse_, expected_bse, rtol=1e-5)
+
+
+def test_nogil_concurrent_fits_match_sequential():
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((500, 5))
+    y = (rng.random(500) < scipy_expit(X @ rng.standard_normal(5))).astype(float)
+
+    ref = FirthLogisticRegression().fit(X, y)
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fits = list(ex.map(lambda _: FirthLogisticRegression().fit(X, y), range(16)))
+
+    for model in fits:
+        np.testing.assert_array_equal(model.coef_, ref.coef_)
+        np.testing.assert_array_equal(model.intercept_, ref.intercept_)
+        assert model.loglik_ == ref.loglik_
