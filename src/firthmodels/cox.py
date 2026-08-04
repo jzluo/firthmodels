@@ -474,32 +474,17 @@ class FirthCoxPH(BaseEstimator):
     def _compute_baseline_hazard(self, precomputed: _CoxPrecomputed) -> None:
         """Compute Breslow baseline cumulative hazard from fitted model."""
         eta = precomputed.X @ self.coef_
-        c = np.max(eta)
-        risk_scaled = np.exp(eta - c)
+        # Risk sets are prefixes of the descending-time sort, so log S0 at
+        # sample i is the prefix logsumexp of eta
+        log_S0 = np.logaddexp.accumulate(eta)
 
-        event_times = []
-        log_hazard_increments = []
+        has_events = precomputed.block_d > 0
+        ends = precomputed.block_ends[has_events] - 1
+        log_h = np.log(precomputed.block_d[has_events]) - log_S0[ends]
 
-        S0_scaled = 0.0
-        start = 0
-        for b in range(precomputed.n_blocks):
-            end = precomputed.block_ends[b]
-            S0_scaled += risk_scaled[start:end].sum()
-
-            d = precomputed.block_d[b]
-            if d > 0:
-                t = precomputed.time[end - 1]
-                # log(d / S0_true) = log(d) - log(S0_scaled) - c
-                log_h = np.log(d) - np.log(S0_scaled) - c
-                event_times.append(t)
-                log_hazard_increments.append(log_h)
-
-            start = end
-
-        # Reverse to ascending time order
-        self.unique_times_ = np.array(event_times[::-1])
-        hazard_increments = np.exp(log_hazard_increments[::-1])
-        self.cum_baseline_hazard_ = np.cumsum(hazard_increments)
+        self.unique_times_ = precomputed.time[ends][::-1]
+        self._log_cum_baseline_hazard = np.logaddexp.accumulate(log_h[::-1])
+        self.cum_baseline_hazard_ = np.exp(self._log_cum_baseline_hazard)
         self.baseline_survival_ = np.exp(-self.cum_baseline_hazard_)
 
     def conf_int(
@@ -667,11 +652,8 @@ class FirthCoxPH(BaseEstimator):
             raise NotImplementedError(
                 "sksurv StepFunction output not supported; use return_array=True"
             )
-        check_is_fitted(self)
-        X = validate_data(self, X, dtype=np.float64, reset=False)
-        X = cast(NDArray[np.float64], X)
-        risk = np.exp(X @ self.coef_)
-        return self.cum_baseline_hazard_ * risk[:, None]
+        logH = self._log_cumulative_hazard(X)
+        return np.exp(logH, out=logH)
 
     def predict_survival_function(
         self, X: ArrayLike, return_array: bool = True
@@ -684,11 +666,16 @@ class FirthCoxPH(BaseEstimator):
             raise NotImplementedError(
                 "sksurv StepFunction output not supported; use return_array=True"
             )
-        check_is_fitted(self)
-        X = validate_data(self, X, dtype=np.float64, reset=False)
-        X = cast(NDArray[np.float64], X)
-        risk = np.exp(X @ self.coef_)
-        return self.baseline_survival_ ** risk[:, None]
+        H = self._log_cumulative_hazard(X)
+        # overflow in H saturates survival to exactly 0
+        with np.errstate(over="ignore"):
+            np.exp(H, out=H)
+        np.negative(H, out=H)
+        return np.exp(H, out=H)
+
+    def _log_cumulative_hazard(self, X: ArrayLike) -> NDArray[np.float64]:
+        """Log cumulative hazard matrix, shape (n_samples, n_event_times)"""
+        return self._log_cum_baseline_hazard + self.predict(X)[:, None]
 
 
 @dataclass

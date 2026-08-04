@@ -96,13 +96,15 @@ class TestFirthCoxPH:
         y = _structured_y(event, time)
 
         model = FirthCoxPH(backend="numba")
-        with np.errstate(divide="ignore", over="ignore"):
-            model.fit(X, y)
+        model.fit(X, y)
 
         assert model.converged_
         np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
         assert np.isfinite(model.loglik_)
         assert np.isfinite(model.bse_[0])
+        assert np.all(np.isfinite(model.cum_baseline_hazard_))
+        surv = model.predict_survival_function(X[:2])
+        assert np.all((surv > 0) & (surv < 1))
 
     def test_lrt_single_parameter(self):
         X = np.array([[1.0], [0.0]])

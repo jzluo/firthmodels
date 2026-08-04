@@ -140,6 +140,25 @@ class TestFirthCoxPH:
             model.baseline_survival_, np.exp(-model.cum_baseline_hazard_)
         )
 
+    def test_predictions_invariant_to_translation(self):
+        X = np.array([[1.0], [0.0]])
+        time = np.array([1.0, 2.0])
+        event = np.array([True, False])
+        y = _structured_y(event, time)
+        shift = 40.0
+
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+        model_shifted = FirthCoxPH(backend="numpy").fit(X + shift, y)
+
+        np.testing.assert_allclose(model_shifted.coef_, model.coef_, rtol=1e-6)
+        surv = model_shifted.predict_survival_function(X + shift)
+        assert np.all((surv > 0) & (surv < 1))
+        np.testing.assert_allclose(
+            model_shifted.predict_cumulative_hazard_function(X + shift),
+            model.predict_cumulative_hazard_function(X),
+            rtol=1e-6,
+        )
+
     def test_matches_coxphf_with_monotone_likelihood(self, cox_separation_data):
         """Matches coxphf on data with monotone likelihood."""
         X, time, event = cox_separation_data
