@@ -1,4 +1,5 @@
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -392,3 +393,20 @@ class TestNumbaConcordanceIndex:
         time = np.array([1.0, 1.0])
         risk = np.array([2.0, 1.0])
         assert concordance_index(event, time, risk) == 1.0
+
+
+def test_nogil_concurrent_fits_match_sequential():
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((500, 5))
+    time = rng.exponential(scale=np.exp(-X @ (rng.standard_normal(5) * 0.2)))
+    event = rng.random(500) < 0.7
+    y = _structured_y(event, time)
+
+    ref = FirthCoxPH().fit(X, y)
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        fits = list(ex.map(lambda _: FirthCoxPH().fit(X, y), range(16)))
+
+    for model in fits:
+        np.testing.assert_array_equal(model.coef_, ref.coef_)
+        assert model.loglik_ == ref.loglik_
