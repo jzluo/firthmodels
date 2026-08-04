@@ -942,6 +942,12 @@ class _Workspace:
         )
 
 
+# Switch to per-block scaling when max(eta) is more than _SCALE_GAP_LIMIT above an
+# event block's own max eta. The fast path computes 1/S0**2, which can reach
+# exp(2 * 300) here. exp overflows past 709
+_SCALE_GAP_LIMIT = 300.0
+
+
 def compute_cox_quantities(
     beta: NDArray[np.float64],
     precomputed: _CoxPrecomputed,
@@ -977,41 +983,58 @@ def compute_cox_quantities(
     k = precomputed.n_features
     ws = workspace
 
-    # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by a
-    # constant, so ratios like S1/S0 are unchanged; we add c back in loglik.
     np.matmul(X, beta, out=ws.eta)
     c = ws.eta.max()
-    np.subtract(ws.eta, c, out=ws.risk)
-    np.exp(ws.risk, out=ws.risk)
 
-    # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
-    np.multiply(X, ws.risk[:, None], out=ws.wX)
-    np.cumsum(ws.risk, out=ws.S0_cumsum)
-    np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
-    np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
-    np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
-
-    # Index at block boundaries to get risk-set sums at each unique time
-    block_end_indices = block_ends - 1
-    S0_at_blocks = ws.S0_cumsum[block_end_indices]
-    S1_at_blocks = ws.S1_cumsum[block_end_indices]
-    S2_at_blocks = ws.S2_cumsum[block_end_indices]
-
-    # Filter to event blocks only
     event_mask = block_d > 0
+    event_block_indices = block_ends[event_mask] - 1
+
+    # With one global c, exp(eta - c) rounds to zero for risk sets that don't
+    # reach near max(eta). Only the earliest event block can be that far off,
+    # so it's the only one we need to check.
+    alpha: NDArray[np.float64] | None = None
+    if c - ws.eta[: event_block_indices[0] + 1].max() > _SCALE_GAP_LIMIT:
+        # Scale each block by the running prefix max c_blocks.
+        block_starts = np.concatenate(([0], block_ends[:-1]))
+        c_blocks = np.maximum.accumulate(np.maximum.reduceat(ws.eta, block_starts))
+        alpha = np.ones(len(block_ends))
+        alpha[1:] = np.exp(c_blocks[:-1] - c_blocks[1:])
+        np.exp(
+            ws.eta - np.repeat(c_blocks, np.diff(block_ends, prepend=0)), out=ws.risk
+        )
+
+        S0_events, S1_events, S2_events = _blockwise_risk_set_sums(
+            X, ws.risk, alpha, block_ends, event_mask
+        )
+        # Add the block's scale to undo the scaling exp(eta - c_blocks).
+        log_S0 = c_blocks[event_mask] + np.log(S0_events)
+    else:
+        # Subtract max(eta) to avoid exp overflow. This rescales all exp(eta) by
+        # a constant, so ratios like S1/S0 are unchanged; we add c back in log_S0.
+        np.subtract(ws.eta, c, out=ws.risk)
+        np.exp(ws.risk, out=ws.risk)
+
+        # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
+        np.multiply(X, ws.risk[:, None], out=ws.wX)
+        np.cumsum(ws.risk, out=ws.S0_cumsum)
+        np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
+        np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
+        np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
+
+        S0_events = ws.S0_cumsum[event_block_indices]  # (n_event_blocks,)
+        S1_events = ws.S1_cumsum[event_block_indices]  # (n_event_blocks, k)
+        S2_events = ws.S2_cumsum[event_block_indices]  # (n_event_blocks, k, k)
+        log_S0 = c + np.log(S0_events)
+
     d_events = block_d[event_mask]  # (n_event_blocks,)
     s_events = block_s[event_mask]  # (n_event_blocks, k)
-    S0_events = S0_at_blocks[event_mask]  # (n_event_blocks,)
-    S1_events = S1_at_blocks[event_mask]  # (n_event_blocks, k)
-    S2_events = S2_at_blocks[event_mask]  # (n_event_blocks, k, k)
 
     S0_inv = 1.0 / S0_events  # (n_event_blocks,)
     S0_inv2 = S0_inv * S0_inv
     # Risk-set weighted mean covariate vector.
     x_bar = S1_events * S0_inv[:, None]
 
-    # Add c to undo the scaling exp(eta - c) in the risk-set sum.
-    loglik = float((s_events @ beta - d_events * (c + np.log(S0_events))).sum())
+    loglik = float((s_events @ beta - d_events * log_S0).sum())
 
     score = (s_events - d_events[:, None] * x_bar).sum(axis=0)
 
@@ -1071,14 +1094,17 @@ def compute_cox_quantities(
     # Cumulative sums for the contracted S3 term and trace term
     # A[i,t] = sum_{j<=i} w[j] * X[j,t] * h[j]
     # B[i] = sum_{j<=i} w[j] * h[j] = trace(I_inv @ S2) at sample i
-    np.multiply(ws.wX, ws.h[:, None], out=ws.wXh)
-    np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
-    np.cumsum(ws.risk * ws.h, out=ws.B_cumsum)
-
-    # Index at event block boundaries
-    event_block_indices = block_end_indices[event_mask]
-    A_events = ws.A_cumsum[event_block_indices]  # (n_event_blocks, k)
-    B_events = ws.B_cumsum[event_block_indices]  # (n_event_blocks,)
+    if alpha is not None:
+        # B and A are just the S0 and S1 sums with weights risk * h
+        B_events, A_events, _ = _blockwise_risk_set_sums(
+            X, ws.risk * ws.h, alpha, block_ends, event_mask
+        )
+    else:
+        np.multiply(ws.wX, ws.h[:, None], out=ws.wXh)
+        np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
+        np.cumsum(ws.risk * ws.h, out=ws.B_cumsum)
+        A_events = ws.A_cumsum[event_block_indices]  # (n_event_blocks, k)
+        B_events = ws.B_cumsum[event_block_indices]  # (n_event_blocks,)
 
     # term1 contracted with I_inv: A/S0 - B*S1/S0^2
     term1_contrib = (
@@ -1101,6 +1127,48 @@ def compute_cox_quantities(
         modified_score=modified_score,
         fisher_info=ws.fisher_info,
     )
+
+
+def _blockwise_risk_set_sums(
+    X: NDArray[np.float64],
+    w: NDArray[np.float64],
+    alpha: NDArray[np.float64],
+    block_ends: NDArray[np.intp],
+    event_mask: NDArray[np.bool_],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """
+    S0, S1, and S2 sums at event blocks with weights w, multiplying the running
+    sums by alpha[b] at each block. Per-block fallback for the global scaling
+    in compute_cox_quantities.
+    """
+    n_events = int(event_mask.sum())
+    k = X.shape[1]
+    S0_events = np.empty(n_events)
+    S1_events = np.empty((n_events, k))
+    S2_events = np.empty((n_events, k, k))
+
+    S0 = 0.0
+    S1 = np.zeros(k)
+    S2 = np.zeros((k, k))
+    start = 0
+    out = 0
+    for b in range(len(block_ends)):
+        end = block_ends[b]
+        wb = w[start:end]
+        Xb = X[start:end]
+        wXb = Xb * wb[:, None]
+        S0 = alpha[b] * S0 + wb.sum()
+        S1 *= alpha[b]
+        S1 += wXb.sum(axis=0)
+        S2 *= alpha[b]
+        S2 += wXb.T @ Xb
+        if event_mask[b]:
+            S0_events[out] = S0
+            S1_events[out] = S1
+            S2_events[out] = S2
+            out += 1
+        start = end
+    return S0_events, S1_events, S2_events
 
 
 def _concordance_index(
