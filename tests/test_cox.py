@@ -140,6 +140,85 @@ class TestFirthCoxPH:
             model.baseline_survival_, np.exp(-model.cum_baseline_hazard_)
         )
 
+    def test_predictions_invariant_to_translation(self):
+        X = np.array([[1.0], [0.0]])
+        time = np.array([1.0, 2.0])
+        event = np.array([True, False])
+        y = _structured_y(event, time)
+        shift = 40.0
+
+        model = FirthCoxPH(backend="numpy").fit(X, y)
+        model_shifted = FirthCoxPH(backend="numpy").fit(X + shift, y)
+
+        np.testing.assert_allclose(model_shifted.coef_, model.coef_, rtol=1e-6)
+        surv = model_shifted.predict_survival_function(X + shift)
+        assert np.all((surv > 0) & (surv < 1))
+        np.testing.assert_allclose(
+            model_shifted.predict_cumulative_hazard_function(X + shift),
+            model.predict_cumulative_hazard_function(X),
+            rtol=1e-6,
+        )
+
+    @pytest.mark.parametrize("outlier", [400.0, 800.0])
+    def test_large_eta_excluded_from_early_risk_set(self, outlier):
+        X = np.array([[1.0], [0.0], [outlier]])
+        time = np.array([3.0, 3.0, 1.0])
+        event = np.array([True, False, False])
+
+        model = FirthCoxPH(backend="numpy").fit(X, _structured_y(event, time))
+        clean = FirthCoxPH(backend="numpy").fit(
+            X[:2], _structured_y(event[:2], time[:2])
+        )
+
+        assert model.converged_
+        np.testing.assert_allclose(model.coef_[0], np.log(3.0), rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(model.bse_, clean.bse_, rtol=1e-6)
+
+        model.lrt()
+        clean.lrt()
+        np.testing.assert_allclose(model.lrt_pvalues_, clean.lrt_pvalues_, rtol=1e-6)
+        np.testing.assert_allclose(
+            model.conf_int(method="pl"), clean.conf_int(method="pl"), rtol=1e-4
+        )
+
+        surv = model.predict_survival_function(X[:2])
+        assert np.all((surv > 0) & (surv < 1))
+
+    def test_blockwise_scaling_matches_global(self, monkeypatch):
+        rng = np.random.default_rng(3)
+        n, k = 30, 2
+        X = rng.normal(size=(n, k))
+        time = rng.integers(1, 8, size=n).astype(np.float64)
+        event = rng.random(n) < 0.5
+        pre = _CoxPrecomputed.from_data(X, time, event, backend="numpy")
+        beta = rng.normal(size=k)
+
+        calls = []
+        orig = firthmodels.cox._blockwise_risk_set_sums
+
+        def spy(*args):
+            calls.append(1)
+            return orig(*args)
+
+        monkeypatch.setattr(firthmodels.cox, "_blockwise_risk_set_sums", spy)
+
+        fast = compute_cox_quantities(
+            beta, pre, _Workspace(pre.n_samples, pre.n_features)
+        )
+        assert not calls
+
+        monkeypatch.setattr(firthmodels.cox, "_SCALE_GAP_LIMIT", -np.inf)
+        slow = compute_cox_quantities(
+            beta, pre, _Workspace(pre.n_samples, pre.n_features)
+        )
+        assert calls
+
+        np.testing.assert_allclose(slow.loglik, fast.loglik, rtol=1e-12)
+        np.testing.assert_allclose(
+            slow.modified_score, fast.modified_score, rtol=1e-12, atol=1e-12
+        )
+        np.testing.assert_allclose(slow.fisher_info, fast.fisher_info, rtol=1e-12)
+
     def test_matches_coxphf_with_monotone_likelihood(self, cox_separation_data):
         """Matches coxphf on data with monotone likelihood."""
         X, time, event = cox_separation_data

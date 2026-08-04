@@ -104,53 +104,55 @@ def precompute_cox(
 def _compute_risk_sum_sets(
     X: NDArray[np.float64],
     beta: NDArray[np.float64],
-    eta: NDArray[np.float64],
     risk: NDArray[np.float64],
     wX: NDArray[np.float64],
     S0_cumsum: NDArray[np.float64],
     S1_cumsum: NDArray[np.float64],
     S2_cumsum: NDArray[np.float64],
+    c_run: NDArray[np.float64],
 ):
-    """Compute eta, risk, and cumulative risk-set sums"""
+    """Compute scaled risk exp(eta_i - c_run[i]) and cumulative risk-set sums"""
     n, k = X.shape
 
-    # eta = X @ beta and stable exp scaling via c
-    c = -np.inf
     for i in range(n):
         total = 0.0
         for j in range(k):
             total += X[i, j] * beta[j]
-        eta[i] = total
-        if total > c:
-            c = total
 
-    # risk and cumulative S0/S1/S2 over risk sets
-    for i in range(n):
-        risk_i = np.exp(eta[i] - c)
-        risk[i] = risk_i
         if i == 0:
-            S0_cumsum[i] = risk_i
-        else:
-            S0_cumsum[i] = S0_cumsum[i - 1] + risk_i
+            c_run[0] = total
+            risk[0] = 1.0
+            S0_cumsum[0] = 1.0
+            for j in range(k):
+                wX[0, j] = X[0, j]
+                S1_cumsum[0, j] = X[0, j]
+            for r in range(k):
+                x_r = X[0, r]
+                for s in range(k):
+                    S2_cumsum[0, r, s] = x_r * X[0, s]
+            continue
+
+        c = c_run[i - 1]
+        a = 1.0
+        if total > c:
+            a = np.exp(c - total)
+            c = total
+        c_run[i] = c
+        risk_i = np.exp(total - c)
+        risk[i] = risk_i
+
+        S0_cumsum[i] = a * S0_cumsum[i - 1] + risk_i
 
         for j in range(k):
             wX_ij = X[i, j] * risk_i
             wX[i, j] = wX_ij
-            if i == 0:
-                S1_cumsum[i, j] = wX_ij
-            else:
-                S1_cumsum[i, j] = S1_cumsum[i - 1, j] + wX_ij
+            S1_cumsum[i, j] = a * S1_cumsum[i - 1, j] + wX_ij
 
         for r in range(k):
             x_r = X[i, r]
             for s in range(k):
                 val = risk_i * x_r * X[i, s]
-                if i == 0:
-                    S2_cumsum[i, r, s] = val
-                else:
-                    S2_cumsum[i, r, s] = S2_cumsum[i - 1, r, s] + val
-
-    return c
+                S2_cumsum[i, r, s] = a * S2_cumsum[i - 1, r, s] + val
 
 
 @njit(fastmath=True, inline="always", cache=True)
@@ -165,7 +167,7 @@ def _compute_score_fisher_loglik(
     x_bar: NDArray[np.float64],
     modified_score: NDArray[np.float64],
     fisher_info: NDArray[np.float64],
-    c: float,
+    c_run: NDArray[np.float64],
 ):
     """Accumulate score and Fisher info across event blocks."""
     k = beta.shape[0]
@@ -196,8 +198,8 @@ def _compute_score_fisher_loglik(
             # score = (s_events - d_events[:, None] * x_bar).sum(axis=0)
             modified_score[r] += block_s[block, r] - d * x_bar[r]
             total += block_s[block, r] * beta[r]
-        # Add c to undo the scaling exp(eta - c) in the risk-set sum.
-        loglik += total - d * (c + np.log(S0))
+        # Add the block's scale to undo the scaling exp(eta - c) in the risk-set sum.
+        loglik += total - d * (c_run[end_idx] + np.log(S0))
 
         # V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
         # fisher_info = np.einsum("b,brt->rt", d_events, V)
@@ -234,8 +236,8 @@ def _compute_firth_correction(
         A_cumsum,
         B_cumsum,
         eye_k,
-        eta,
         risk,
+        c_run,
         h,
         fisher_info,
     ) = workspace
@@ -243,12 +245,6 @@ def _compute_firth_correction(
     n, k = X.shape
     # using Ix as a scratch buffer
     tmp_k = Ix
-
-    # XI = X @ inv_fisher_info
-    # h = np.einsum("ij,ij->i", XI, X)
-    # TODO: benchmark BLAS-based XI/Ix (with transa using X.T or F-order X) vs loops.
-    # since X is C-order, we would need to add a transa option to the dgemm wrapper.
-    # just use loops for now
 
     # compute h without storing XI
     for i in range(n):
@@ -263,22 +259,20 @@ def _compute_firth_correction(
             total += tmp_k[j] * X[i, j]
         h[i] = total
 
-    # np.multiply(ws.wX, h[:, None], out=ws.wXh)
-    # np.cumsum(ws.wXh, axis=0, out=ws.A_cumsum)
-    # np.cumsum(risk * h, out=ws.B_cumsum)
-    for i in range(n):
-        risk_h = risk[i] * h[i]
-        if i == 0:
-            B_cumsum[i] = risk_h
-        else:
-            B_cumsum[i] = B_cumsum[i - 1] + risk_h
+    B_cumsum[0] = risk[0] * h[0]
+    for j in range(k):
+        wXh_0j = wX[0, j] * h[0]
+        wXh[0, j] = wXh_0j
+        A_cumsum[0, j] = wXh_0j
+    for i in range(1, n):
+        a = 1.0
+        if c_run[i] > c_run[i - 1]:
+            a = np.exp(c_run[i - 1] - c_run[i])
+        B_cumsum[i] = a * B_cumsum[i - 1] + risk[i] * h[i]
         for j in range(k):
             wXh_ij = wX[i, j] * h[i]
             wXh[i, j] = wXh_ij
-            if i == 0:
-                A_cumsum[i, j] = wXh_ij
-            else:
-                A_cumsum[i, j] = A_cumsum[i - 1, j] + wXh_ij
+            A_cumsum[i, j] = a * A_cumsum[i - 1, j] + wXh_ij
 
     # Index at event block boundaries
     n_blocks = block_ends.shape[0]
@@ -353,21 +347,21 @@ def compute_cox_quantities(
         A_cumsum,
         B_cumsum,
         eye_k,
-        eta,
         risk,
+        c_run,
         h,
         fisher_info,
     ) = workspace
 
-    c = _compute_risk_sum_sets(
+    _compute_risk_sum_sets(
         X=X,
         beta=beta,
-        eta=eta,
         risk=risk,
         wX=wX,
         S0_cumsum=S0_cumsum,
         S1_cumsum=S1_cumsum,
         S2_cumsum=S2_cumsum,
+        c_run=c_run,
     )
 
     loglik = _compute_score_fisher_loglik(
@@ -381,7 +375,7 @@ def compute_cox_quantities(
         x_bar=x_bar,
         modified_score=modified_score,
         fisher_info=fisher_info,
-        c=c,
+        c_run=c_run,
     )
 
     if penalty_weight == 0.0:
@@ -481,8 +475,8 @@ def newton_raphson_cox(
         A_cumsum,
         B_cumsum,
         eye_k,
-        eta,
         risk,
+        c_run,
         h,
         fisher_info,
     ) = workspace
@@ -654,8 +648,8 @@ def constrained_lrt_1df_cox(
         A_cumsum,
         B_cumsum,
         eye_k,
-        eta,
         risk,
+        c_run,
         h,
         fisher_info,
     ) = workspace
@@ -842,8 +836,8 @@ def profile_ci_bound_cox(
         A_cumsum,
         B_cumsum,
         eye_k,
-        eta,
         risk,
+        c_run,
         h,
         fisher_info,
     ) = workspace
