@@ -251,6 +251,10 @@ class FirthCoxPH(BaseEstimator):
         self.loglik_ = result.loglik
         self.n_iter_ = result.n_iter
 
+        # Fisher info at the fitted beta, used by conf_int for the Hessian at the MLE
+        # copy since both backends alias a workspace buffer that's overwritten later
+        self._fisher_info = result.fisher_info.copy()
+
         # Wald
         self._cov = None
         if not np.all(np.isfinite(result.fisher_info)):
@@ -360,6 +364,15 @@ class FirthCoxPH(BaseEstimator):
             feature_names_in=getattr(self, "feature_names_in_", None),
         )
 
+    def _compute_quantities(self, beta: NDArray[np.float64]) -> CoxQuantities:
+        """Penalized likelihood quantities at beta for the fitted data"""
+        return compute_cox_quantities(
+            beta=beta,
+            precomputed=self._precomputed,
+            workspace=self._workspace,
+            penalty_weight=self.penalty_weight,
+        )
+
     def _compute_single_lrt(self, idx: int, *, warm_start: bool = True) -> None:
         """
         Fit constrained model with `beta[idx]=0` and compute LRT p-value and
@@ -433,20 +446,11 @@ class FirthCoxPH(BaseEstimator):
             )
 
         else:
-
-            def compute_quantities_full(beta):
-                return compute_cox_quantities(
-                    beta=beta,
-                    precomputed=self._precomputed,
-                    workspace=self._workspace,
-                    penalty_weight=self.penalty_weight,
-                )
-
             result = constrained_lrt_1df(
                 idx=idx,
                 beta_hat_full=beta_hat_full,
                 loglik_full=self.loglik_,
-                compute_quantities_full=compute_quantities_full,
+                compute_quantities_full=self._compute_quantities,
                 beta_init_free=beta_init_free,
                 max_iter=self.max_iter,
                 max_step=self.max_step,
@@ -575,17 +579,9 @@ class FirthCoxPH(BaseEstimator):
             chi2_crit = scipy.stats.chi2.ppf(1 - alpha, 1)
             l_star = self.loglik_ - chi2_crit / 2
 
-            def compute_quantities_full(beta: NDArray[np.float64]):
-                return compute_cox_quantities(
-                    beta=beta,
-                    precomputed=self._precomputed,
-                    workspace=self._workspace,
-                    penalty_weight=self.penalty_weight,
-                )
-
             theta_hat = self.coef_.copy()
 
-            D0 = -compute_quantities_full(theta_hat).fisher_info  # hessian at MLE
+            D0 = -self._fisher_info  # hessian at MLE
             for idx in indices:
                 for bound_idx, which in enumerate([-1, 1]):  # lower, upper
                     if not computed[idx, bound_idx]:
@@ -623,7 +619,7 @@ class FirthCoxPH(BaseEstimator):
                                 max_iter=max_iter,
                                 tol=tol,
                                 chi2_crit=chi2_crit,
-                                compute_quantities_full=compute_quantities_full,
+                                compute_quantities_full=self._compute_quantities,
                                 D0=D0,
                             )
 
@@ -919,6 +915,7 @@ class _Workspace:
         "eye_k",
         "eta",
         "risk",
+        "c_run",
         "XI",
         "h",
         "fisher_info",
@@ -936,6 +933,7 @@ class _Workspace:
         self.eye_k = np.eye(k, dtype=np.float64, order="F")
         self.eta = np.empty(n, dtype=np.float64)
         self.risk = np.empty(n, dtype=np.float64)
+        self.c_run = np.empty(n, dtype=np.float64)
         self.XI = np.empty((n, k), dtype=np.float64)
         self.h = np.empty(n, dtype=np.float64)
         self.fisher_info = np.empty((k, k), dtype=np.float64, order="F")
@@ -950,8 +948,8 @@ class _Workspace:
             self.A_cumsum,
             self.B_cumsum,
             self.eye_k,
-            self.eta,
             self.risk,
+            self.c_run,
             self.h,
             self.fisher_info,
         )
