@@ -824,12 +824,9 @@ Requires R with the logistf, brglm2, coxphf, survival, microbenchmark, and
 jsonlite packages installed.
 
 ```bash
-# Run benchmarks (writes CSVs, R reference values, and .meta.json run metadata)
-uv run python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.csv
-uv run python benchmarks/benchmark_cox.py -o benchmarks/cox_results.csv
-
-# Generate plots and this README
-uv run python benchmarks/generate_report.py
+# Run both benchmarks (writes CSVs, R reference values, and .meta.json run
+# metadata), then regenerate the plots and this README
+benchmarks/run_benchmarks.sh
 ```
 """
 
