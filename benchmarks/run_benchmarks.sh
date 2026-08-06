@@ -16,11 +16,11 @@ case "$target" in
 esac
 
 if [[ "$target" == "all" || "$target" == "logistic" ]]; then
-    uv run python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.csv
+    uv run python benchmarks/benchmark_logistic.py -o benchmarks/logistic_results.json
 fi
 
 if [[ "$target" == "all" || "$target" == "cox" ]]; then
-    uv run python benchmarks/benchmark_cox.py -o benchmarks/cox_results.csv
+    uv run python benchmarks/benchmark_cox.py -o benchmarks/cox_results.json
 fi
 
 uv run python benchmarks/generate_report.py

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate benchmarks README from CSV results.
+"""Generate benchmarks README from saved results.
 
-Reads timing CSVs produced by benchmark_logistic.py / benchmark_cox.py,
-together with the .meta.json sidecars those scripts write (run counts,
-verification status, observed deviations, versions).
+Reads the results JSON files produced by benchmark_logistic.py /
+benchmark_cox.py, which hold the timings, the R reference values, and the
+run metadata (run counts, verification status, observed deviations,
+versions).
 
 Solver and data-generation parameters quoted in the report are imported from
 the benchmark scripts.
@@ -184,16 +185,10 @@ QUANTITY_LABELS = {
 DeviationRow = tuple[str, str, float]
 
 
-def load_metadata(csv_path: Path) -> dict | None:
-    """Load the .meta.json sidecar written by the benchmark scripts."""
-    meta_path = csv_path.with_suffix(".meta.json")
-    if not meta_path.exists():
-        return None
-    try:
-        return json.loads(meta_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"WARNING: could not read {meta_path}: {exc}", file=sys.stderr)
-        return None
+def load_results(path: Path) -> tuple[pd.DataFrame, dict | None]:
+    """Load a results JSON written by the benchmark scripts."""
+    data = json.loads(path.read_text())
+    return pd.DataFrame(data["results"]), data.get("meta")
 
 
 def metadata_deviation_rows(meta: dict | None, model_label: str) -> list[DeviationRow]:
@@ -333,7 +328,7 @@ def runs_sentence(logistic_meta: dict | None, cox_meta: dict | None) -> str:
                     f"for k > {reduced['for_k_above']})"
                 )
             return n
-        return f"{script_default} (script default; not recorded for these CSVs)"
+        return f"{script_default} (script default; not recorded in the results file)"
 
     logistic = describe(logistic_meta, bl.N_RUNS)
     cox = describe(cox_meta, bc.N_RUNS)
@@ -637,7 +632,7 @@ the numba backend against the numpy backend)."""
         )
         parts.append(
             "Maximum over all coefficients and all k during the benchmark run "
-            "(recorded in the .meta.json run metadata):\n\n" + table
+            "(recorded in the results file's run metadata):\n\n" + table
         )
 
     for note in meta_notes:
@@ -760,9 +755,9 @@ def generate_report(
     for meta, name in [(logistic_meta, "logistic"), (cox_meta, "Cox")]:
         if meta is None:
             meta_notes.append(
-                f"No run metadata was found alongside the {name} CSV (it "
-                "predates metadata support), so benchmark-time verification "
-                "cannot be confirmed from the files alone."
+                f"The {name} results file has no run metadata (it predates "
+                "metadata support), so benchmark-time verification cannot be "
+                "confirmed from the file alone."
             )
         elif not (meta.get("verification") or {}).get("performed"):
             meta_notes.append(
@@ -824,8 +819,9 @@ Requires R with the logistf, brglm2, coxphf, survival, microbenchmark, and
 jsonlite packages installed.
 
 ```bash
-# Run both benchmarks (writes CSVs, R reference values, and .meta.json run
-# metadata), then regenerate the plots and this README
+# Run both benchmarks (writes results JSON files holding the timings, R
+# reference values, and run metadata), then regenerate the plots and this
+# README
 benchmarks/run_benchmarks.sh
 ```
 """
@@ -833,17 +829,17 @@ benchmarks/run_benchmarks.sh
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate benchmarks README from CSV results"
+        description="Generate benchmarks README from saved results"
     )
     parser.add_argument(
         "--logistic-results",
         type=Path,
-        default=BENCHMARKS_DIR / "logistic_results.csv",
+        default=BENCHMARKS_DIR / "logistic_results.json",
     )
     parser.add_argument(
         "--cox-results",
         type=Path,
-        default=BENCHMARKS_DIR / "cox_results.csv",
+        default=BENCHMARKS_DIR / "cox_results.json",
     )
     parser.add_argument(
         "-o",
@@ -858,15 +854,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    for csv in (args.logistic_results, args.cox_results):
-        if not csv.exists():
-            print(f"Error: {csv} not found; run the benchmark first", file=sys.stderr)
+    for path in (args.logistic_results, args.cox_results):
+        if not path.exists():
+            print(f"Error: {path} not found; run the benchmark first", file=sys.stderr)
             sys.exit(1)
 
-    logistic_df = pd.read_csv(args.logistic_results)
-    cox_df = pd.read_csv(args.cox_results)
-    logistic_meta = load_metadata(args.logistic_results)
-    cox_meta = load_metadata(args.cox_results)
+    logistic_df, logistic_meta = load_results(args.logistic_results)
+    cox_df, cox_meta = load_results(args.cox_results)
 
     print("Collecting environment info...", file=sys.stderr)
     env_info = get_environment_info()

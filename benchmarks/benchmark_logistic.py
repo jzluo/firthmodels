@@ -501,18 +501,18 @@ def compute_min(times: np.ndarray) -> float:
 # Saved results loading
 # -----------------------------------------------------------------------------
 def load_saved_results(
-    saved_csv: str,
+    saved_path: str,
     k_values: list[int],
     load_firthmodels: bool = False,
     load_brglm2: bool = True,
     load_logistf: bool = True,
 ) -> tuple[pd.DataFrame, dict[int, dict] | None, dict[str, dict[int, dict]] | None]:
-    """Load results from a saved CSV file.
+    """Load results from a saved results JSON file.
 
     Parameters
     ----------
-    saved_csv : str
-        Path to CSV with previous results.
+    saved_path : str
+        Path to results JSON with previous results.
     k_values : list of int
         Which k values to load.
     load_firthmodels : bool
@@ -531,7 +531,8 @@ def load_saved_results(
     brglm2_results : dict or None
         brglm2 results if load_brglm2=True, else None.
     """
-    saved_df = pd.read_csv(saved_csv)
+    with open(saved_path) as f:
+        saved_df = pd.DataFrame(json.load(f)["results"])
 
     # Determine required columns based on what we're loading
     required_cols = {"k", "n"}
@@ -571,18 +572,19 @@ def load_saved_results(
 
     missing_cols = required_cols - set(saved_df.columns)
     if missing_cols:
-        raise ValueError(f"Saved CSV missing columns: {missing_cols}")
+        raise ValueError(f"Saved results missing columns: {missing_cols}")
 
     saved_n = int(saved_df["n"].iloc[0])
     if saved_n != N_SAMPLES:
         raise ValueError(
-            f"Saved CSV was created with n={saved_n}, but current N_SAMPLES={N_SAMPLES}."
+            f"Saved results were created with n={saved_n}, "
+            f"but current N_SAMPLES={N_SAMPLES}."
         )
 
     saved_k = set(saved_df["k"].tolist())
     missing = set(k_values) - saved_k
     if missing:
-        raise ValueError(f"k values {missing} not in saved CSV")
+        raise ValueError(f"k values {missing} not in saved results")
 
     # Reconstruct results from saved data
     logistf_dict: dict[int, dict] = {}
@@ -595,20 +597,20 @@ def load_saved_results(
 
         if load_logistf:
             logistf_dict[k] = {
-                "fit_coef": np.array(json.loads(row["logistf_fit_coef"])),
+                "fit_coef": np.asarray(row["logistf_fit_coef"]),
                 "fit_intercept": row["logistf_fit_intercept"],
-                "full_coef": np.array(json.loads(row["logistf_full_coef"])),
+                "full_coef": np.asarray(row["logistf_full_coef"]),
                 "full_intercept": row["logistf_full_intercept"],
-                "full_ci": np.array(json.loads(row["logistf_full_ci"])),
-                "full_pval": np.array(json.loads(row["logistf_full_pval"])),
+                "full_ci": np.asarray(row["logistf_full_ci"]),
+                "full_pval": np.asarray(row["logistf_full_pval"]),
             }
         if load_brglm2:
             brglm2_dict["AS_mean"][k] = {
-                "fit_coef": np.array(json.loads(row["brglm2_as_fit_coef"])),
+                "fit_coef": np.asarray(row["brglm2_as_fit_coef"]),
                 "fit_intercept": row["brglm2_as_fit_intercept"],
             }
             brglm2_dict["MPL_Jeffreys"][k] = {
-                "fit_coef": np.array(json.loads(row["brglm2_mpl_fit_coef"])),
+                "fit_coef": np.asarray(row["brglm2_mpl_fit_coef"]),
                 "fit_intercept": row["brglm2_mpl_fit_intercept"],
             }
 
@@ -643,7 +645,7 @@ def run_benchmarks(
     logistf_reduce_after : int or None
         Reduce logistf runs to max(3, n/3) for k > this value. None to disable.
     saved : str or None
-        Path to CSV with saved results. Non-selected libraries load from here.
+        Path to a saved results JSON. Non-selected libraries load from here.
     run_firthmodels : bool
         Whether to run firthmodels (Python) benchmarks.
     run_brglm2 : bool
@@ -659,7 +661,7 @@ def run_benchmarks(
         Version and BLAS info for all libraries
     run_meta : dict
         Run metadata: run counts, verification status and observed
-        deviations, versions. Saved as a .meta.json sidecar by main().
+        deviations, versions. Saved into the results JSON by main().
     """
     version_info = get_python_version_info()
 
@@ -894,16 +896,16 @@ def run_benchmarks(
                     "numba_full_ms": numba_full_ms,
                     "numpy_full_ms": numpy_full_ms,
                     "logistf_full_ms": logistf_full_ms,
-                    "brglm2_as_fit_coef": json.dumps(brglm2_as["fit_coef"].tolist()),
+                    "brglm2_as_fit_coef": np.asarray(brglm2_as["fit_coef"]).tolist(),
                     "brglm2_as_fit_intercept": brglm2_as["fit_intercept"],
-                    "brglm2_mpl_fit_coef": json.dumps(brglm2_mpl["fit_coef"].tolist()),
+                    "brglm2_mpl_fit_coef": np.asarray(brglm2_mpl["fit_coef"]).tolist(),
                     "brglm2_mpl_fit_intercept": brglm2_mpl["fit_intercept"],
-                    "logistf_fit_coef": json.dumps(logistf["fit_coef"].tolist()),
+                    "logistf_fit_coef": np.asarray(logistf["fit_coef"]).tolist(),
                     "logistf_fit_intercept": logistf["fit_intercept"],
-                    "logistf_full_coef": json.dumps(logistf["full_coef"].tolist()),
+                    "logistf_full_coef": np.asarray(logistf["full_coef"]).tolist(),
                     "logistf_full_intercept": logistf["full_intercept"],
-                    "logistf_full_ci": json.dumps(logistf["full_ci"].tolist()),
-                    "logistf_full_pval": json.dumps(logistf["full_pval"].tolist()),
+                    "logistf_full_ci": np.asarray(logistf["full_ci"]).tolist(),
+                    "logistf_full_pval": np.asarray(logistf["full_pval"]).tolist(),
                 }
             )
 
@@ -997,14 +999,14 @@ def main():
         "--out",
         type=str,
         default=None,
-        help="Save results to CSV file",
+        help="Save results (timings, R references, run metadata) to JSON file",
     )
     parser.add_argument(
         "--saved",
         type=str,
         default=None,
-        metavar="CSV",
-        help="Load non-selected libraries from this CSV.",
+        metavar="JSON",
+        help="Load non-selected libraries from this results JSON.",
     )
     parser.add_argument(
         "--firthmodels",
@@ -1086,11 +1088,12 @@ def main():
     print_table(df)
 
     if args.out:
-        df.to_csv(args.out, index=False)
-        meta_path = Path(args.out).with_suffix(".meta.json")
-        with open(meta_path, "w") as f:
-            json.dump(run_meta, f, indent=2)
-        print(f"\nResults saved to {args.out} (metadata: {meta_path})", file=sys.stderr)
+        with open(args.out, "w") as f:
+            json.dump(
+                {"meta": run_meta, "results": df.to_dict(orient="records")}, f, indent=2
+            )
+            f.write("\n")
+        print(f"\nResults saved to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

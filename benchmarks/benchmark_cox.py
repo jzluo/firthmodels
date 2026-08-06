@@ -442,17 +442,17 @@ def compute_min(times: np.ndarray) -> float:
 # Saved results loading
 # -----------------------------------------------------------------------------
 def load_saved_results(
-    saved_csv: str,
+    saved_path: str,
     k_values: list[int],
     load_firthmodels: bool = False,
     load_coxphf: bool = True,
 ) -> tuple[pd.DataFrame, dict[int, dict] | None]:
-    """Load results from a saved CSV file.
+    """Load results from a saved results JSON file.
 
     Parameters
     ----------
-    saved_csv : str
-        Path to CSV with previous results.
+    saved_path : str
+        Path to results JSON with previous results.
     k_values : list of int
         Which k values to load.
     load_firthmodels : bool
@@ -467,7 +467,8 @@ def load_saved_results(
     coxphf_results : dict or None
         coxphf results if load_coxphf=True, else None.
     """
-    saved_df = pd.read_csv(saved_csv)
+    with open(saved_path) as f:
+        saved_df = pd.DataFrame(json.load(f)["results"])
 
     # Determine required columns based on what we're loading
     required_cols = {"k", "n"}
@@ -489,20 +490,21 @@ def load_saved_results(
 
     missing_cols = required_cols - set(saved_df.columns)
     if missing_cols:
-        raise ValueError(f"Saved CSV missing columns: {missing_cols}")
+        raise ValueError(f"Saved results missing columns: {missing_cols}")
 
     saved_n = int(saved_df["n"].iloc[0])
     if saved_n != N_SAMPLES:
         raise ValueError(
-            f"Saved CSV was created with n={saved_n}, but current N_SAMPLES={N_SAMPLES}."
+            f"Saved results were created with n={saved_n}, "
+            f"but current N_SAMPLES={N_SAMPLES}."
         )
 
     saved_k = set(saved_df["k"].tolist())
     missing = set(k_values) - saved_k
     if missing:
-        raise ValueError(f"k values {missing} not in saved CSV")
+        raise ValueError(f"k values {missing} not in saved results")
 
-    # No need to parse JSON - we copy strings directly from saved_df rows
+    # Reference values are copied verbatim from saved_df rows, so no parsing
     return saved_df, None
 
 
@@ -521,7 +523,7 @@ def run_benchmarks(
     """Run all benchmarks and return results as DataFrame.
 
     Also returns version_info and run_meta (run counts, verification status
-    and observed deviations, versions; saved as a .meta.json sidecar by
+    and observed deviations, versions; saved into the results JSON by
     main()).
     """
     version_info = get_python_version_info()
@@ -706,10 +708,10 @@ def run_benchmarks(
                 row["coxphf_fit_ms"] = compute_min(r["fit_times"]) * 1000
                 row["coxphf_full_ms"] = compute_min(r["full_times"]) * 1000
                 # Store for reproducibility
-                row["coxphf_fit_coef"] = json.dumps(r["fit_coef"].tolist())
-                row["coxphf_full_coef"] = json.dumps(r["full_coef"].tolist())
-                row["coxphf_full_ci"] = json.dumps(r["full_ci"].tolist())
-                row["coxphf_full_pval"] = json.dumps(r["full_pval"].tolist())
+                row["coxphf_fit_coef"] = np.asarray(r["fit_coef"]).tolist()
+                row["coxphf_full_coef"] = np.asarray(r["full_coef"]).tolist()
+                row["coxphf_full_ci"] = np.asarray(r["full_ci"]).tolist()
+                row["coxphf_full_pval"] = np.asarray(r["full_pval"]).tolist()
             else:
                 assert saved_row is not None
                 row["coxphf_fit_ms"] = saved_row["coxphf_fit_ms"]
@@ -808,14 +810,14 @@ def main():
         "--out",
         type=str,
         default=None,
-        help="Save results to CSV file",
+        help="Save results (timings, R references, run metadata) to JSON file",
     )
     parser.add_argument(
         "--saved",
         type=str,
         default=None,
-        metavar="CSV",
-        help="Load non-selected libraries from this CSV.",
+        metavar="JSON",
+        help="Load non-selected libraries from this results JSON.",
     )
     parser.add_argument(
         "--firthmodels",
@@ -886,11 +888,12 @@ def main():
     print_table(df)
 
     if args.out:
-        df.to_csv(args.out, index=False)
-        meta_path = Path(args.out).with_suffix(".meta.json")
-        with open(meta_path, "w") as f:
-            json.dump(run_meta, f, indent=2)
-        print(f"\nResults saved to {args.out} (metadata: {meta_path})", file=sys.stderr)
+        with open(args.out, "w") as f:
+            json.dump(
+                {"meta": run_meta, "results": df.to_dict(orient="records")}, f, indent=2
+            )
+            f.write("\n")
+        print(f"\nResults saved to {args.out}", file=sys.stderr)
 
 
 if __name__ == "__main__":
