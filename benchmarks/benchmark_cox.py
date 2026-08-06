@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -29,7 +30,7 @@ from firthmodels import FirthCoxPH
 N_SAMPLES = 500
 EVENT_RATE = 0.20
 K_VALUES = list(range(5, 35, 5))
-N_RUNS = 15
+N_RUNS = 10
 BASE_SEED = 0
 
 # Solver parameters
@@ -43,8 +44,8 @@ COEF_TOL = 1e-6
 CI_TOL = 1e-6
 PVAL_TOL = 1e-6
 
-# Reduce coxphf benchmark runs for large k
-COXPHF_REDUCE_AFTER = 5
+# Reduce coxphf benchmark runs for large k (0 disables reduction)
+COXPHF_REDUCE_AFTER = 0
 
 
 # -----------------------------------------------------------------------------
@@ -279,26 +280,41 @@ def check_agreement(
     r_ci: np.ndarray | None = None,
     py_pval: np.ndarray | None = None,
     r_pval: np.ndarray | None = None,
+    deviations: dict[str, dict[str, float]] | None = None,
 ) -> None:
-    """Check that Python and R results agree within tolerance."""
-    # Check coefficients
+    """Check that Python and R results agree within tolerance.
+
+    If a deviations dict is provided, the observed max absolute differences
+    are merged into it under label, keyed by quantity, taking the max over
+    successive calls (i.e. over k). Recorded before any tolerance failure is
+    raised.
+    """
+    observed: dict[str, float] = {}
+
     coef_diff = np.max(np.abs(py_coef - r_coef))
+    observed["coef"] = float(coef_diff)
+
+    if py_ci is not None and r_ci is not None:
+        observed["ci"] = float(np.max(np.abs(py_ci - r_ci)))
+
+    if py_pval is not None and r_pval is not None:
+        observed["pval"] = float(np.max(np.abs(py_pval - r_pval)))
+
+    if deviations is not None:
+        bucket = deviations.setdefault(label, {})
+        for quantity, value in observed.items():
+            bucket[quantity] = max(bucket.get(quantity, 0.0), value)
+
     if coef_diff > COEF_TOL:
         raise AssertionError(f"k={k} ({label}): coef diff {coef_diff:.2e} > {COEF_TOL}")
-
-    # Check CIs if provided
-    if py_ci is not None and r_ci is not None:
-        ci_diff = np.max(np.abs(py_ci - r_ci))
-        if ci_diff > CI_TOL:
-            raise AssertionError(f"k={k} ({label}): CI diff {ci_diff:.2e} > {CI_TOL}")
-
-    # Check p-values if provided
-    if py_pval is not None and r_pval is not None:
-        pval_diff = np.max(np.abs(py_pval - r_pval))
-        if pval_diff > PVAL_TOL:
-            raise AssertionError(
-                f"k={k} ({label}): p-value diff {pval_diff:.2e} > {PVAL_TOL}"
-            )
+    if observed.get("ci", 0.0) > CI_TOL:
+        raise AssertionError(
+            f"k={k} ({label}): CI diff {observed['ci']:.2e} > {CI_TOL}"
+        )
+    if observed.get("pval", 0.0) > PVAL_TOL:
+        raise AssertionError(
+            f"k={k} ({label}): p-value diff {observed['pval']:.2e} > {PVAL_TOL}"
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -501,8 +517,13 @@ def run_benchmarks(
     saved: str | None = None,
     run_firthmodels: bool = True,
     run_coxphf: bool = True,
-) -> tuple[pd.DataFrame, dict[str, str]]:
-    """Run all benchmarks and return results as DataFrame."""
+) -> tuple[pd.DataFrame, dict[str, str], dict]:
+    """Run all benchmarks and return results as DataFrame.
+
+    Also returns version_info and run_meta (run counts, verification status
+    and observed deviations, versions; saved as a .meta.json sidecar by
+    main()).
+    """
     version_info = get_python_version_info()
 
     # Load saved results for libraries we're not running
@@ -580,7 +601,7 @@ def run_benchmarks(
         if coxphf_results is None:
             coxphf_results = {}
         if run_coxphf:
-            if coxphf_reduce_after is not None:
+            if coxphf_reduce_after:
                 k_low = [k for k in k_values if k <= coxphf_reduce_after]
                 k_high = [k for k in k_values if k > coxphf_reduce_after]
 
@@ -612,6 +633,7 @@ def run_benchmarks(
             "Verifying results and computing statistics...", file=sys.stderr, flush=True
         )
         results = []
+        deviations: dict[str, dict[str, float]] = {}
 
         for k in k_values:
             X, surv_time, event = make_benchmark_data(
@@ -622,21 +644,32 @@ def run_benchmarks(
             if run_firthmodels and run_coxphf and not skip_verification:
                 py = py_results["numba"][k]
                 r = coxphf_results[k]
-                check_agreement(k, py["fit_coef"], r["fit_coef"], "fit")
+                check_agreement(
+                    k,
+                    py["fit_coef"],
+                    r["fit_coef"],
+                    "fit vs coxphf",
+                    deviations=deviations,
+                )
                 check_agreement(
                     k,
                     py["full_coef"],
                     r["full_coef"],
-                    "full",
+                    "full vs coxphf",
                     py["full_ci"],
                     r["full_ci"],
                     py["full_pval"],
                     r["full_pval"],
+                    deviations=deviations,
                 )
                 # Also check numba vs numpy
                 py_numpy = py_results["numpy"][k]
                 check_agreement(
-                    k, py["fit_coef"], py_numpy["fit_coef"], "numba vs numpy"
+                    k,
+                    py["fit_coef"],
+                    py_numpy["fit_coef"],
+                    "numba vs numpy",
+                    deviations=deviations,
                 )
 
             # Collect timing results
@@ -688,7 +721,39 @@ def run_benchmarks(
 
             results.append(row)
 
-    return pd.DataFrame(results), version_info
+    reduced = n_runs if n_runs <= 3 else max(3, n_runs // 3)
+    run_meta = {
+        "schema_version": 1,
+        "model": "cox",
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "n_runs": n_runs,
+        "r_reduced_runs": (
+            {
+                "libraries": ["coxphf"],
+                "for_k_above": coxphf_reduce_after,
+                "n_runs": reduced,
+            }
+            if coxphf_reduce_after
+            else None
+        ),
+        "k_values": list(k_values),
+        "libraries_run": [
+            name
+            for name, flag in [
+                ("firthmodels", run_firthmodels),
+                ("coxphf", run_coxphf),
+            ]
+            if flag
+        ],
+        "loaded_from_saved": saved,
+        "verification": {
+            "performed": bool(deviations),
+            "tolerances": {"coef": COEF_TOL, "ci": CI_TOL, "pval": PVAL_TOL},
+            "max_abs_deviations": deviations,
+        },
+        "versions": version_info,
+    }
+    return pd.DataFrame(results), version_info, run_meta
 
 
 def print_table(df: pd.DataFrame) -> None:
@@ -807,7 +872,7 @@ def main():
         )
 
     # Run benchmarks
-    df, version_info = run_benchmarks(
+    df, version_info, run_meta = run_benchmarks(
         k_values=k_values,
         n_runs=args.n_runs,
         skip_verification=args.skip_verification,
@@ -822,7 +887,10 @@ def main():
 
     if args.out:
         df.to_csv(args.out, index=False)
-        print(f"\nResults saved to {args.out}", file=sys.stderr)
+        meta_path = Path(args.out).with_suffix(".meta.json")
+        with open(meta_path, "w") as f:
+            json.dump(run_meta, f, indent=2)
+        print(f"\nResults saved to {args.out} (metadata: {meta_path})", file=sys.stderr)
 
 
 if __name__ == "__main__":
