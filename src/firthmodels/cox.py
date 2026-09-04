@@ -37,7 +37,7 @@ if NUMBA_AVAILABLE:
 from firthmodels._lrt import constrained_lrt_1df, lrt_result_from_loglik
 from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import FirthResult, resolve_feature_indices
+from firthmodels._utils import FirthResult, compensated_sum, resolve_feature_indices
 
 
 class FirthCoxPH(BaseEstimator):
@@ -1017,6 +1017,7 @@ def compute_cox_quantities(
         # S0, S1, S2 are cumulative sums over the risk set (everyone with time >= t).
         np.multiply(X, ws.risk[:, None], out=ws.wX)
         np.cumsum(ws.risk, out=ws.S0_cumsum)
+        _compensate_cumsum(ws.risk, ws.S0_cumsum)
         np.cumsum(ws.wX, axis=0, out=ws.S1_cumsum)
         np.multiply(ws.wX[:, :, None], X[:, None, :], out=ws.S2_cumsum)
         np.cumsum(ws.S2_cumsum, axis=0, out=ws.S2_cumsum)
@@ -1034,7 +1035,7 @@ def compute_cox_quantities(
     # Risk-set weighted mean covariate vector.
     x_bar = S1_events * S0_inv[:, None]
 
-    loglik = float((s_events @ beta - d_events * log_S0).sum())
+    loglik = compensated_sum(s_events @ beta - d_events * log_S0)
 
     score = (s_events - d_events[:, None] * x_bar).sum(axis=0)
 
@@ -1127,6 +1128,14 @@ def compute_cox_quantities(
         modified_score=modified_score,
         fisher_info=ws.fisher_info,
     )
+
+
+def _compensate_cumsum(terms: NDArray[np.float64], cumsum: NDArray[np.float64]) -> None:
+    """Add each step's rounding error back into a sequential cumsum, in place."""
+    prev, cur, term = cumsum[:-1], cumsum[1:], terms[1:]
+    t = cur - prev
+    error = (prev - (cur - t)) + (term - t)  # TwoSum: rounding error of prev + term
+    cur += np.cumsum(error)
 
 
 def _blockwise_risk_set_sums(

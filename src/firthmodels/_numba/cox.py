@@ -20,6 +20,7 @@ from firthmodels._numba.linalg import (
     dpotrs,
     dpstrf,
     dsyrk,
+    neumaier_add,
     set_identity,
     step_below_resolution,
     symmetrize_lower,
@@ -115,6 +116,8 @@ def _compute_risk_sum_sets(
     """Compute scaled risk exp(eta_i - c_run[i]) and cumulative risk-set sums"""
     n, k = X.shape
 
+    s0 = 0.0
+    s0_compensation = 0.0
     for i in range(n):
         total = 0.0
         for j in range(k):
@@ -123,6 +126,7 @@ def _compute_risk_sum_sets(
         if i == 0:
             c_run[0] = total
             risk[0] = 1.0
+            s0 = 1.0
             S0_cumsum[0] = 1.0
             for j in range(k):
                 wX[0, j] = X[0, j]
@@ -142,7 +146,10 @@ def _compute_risk_sum_sets(
         risk_i = np.exp(total - c)
         risk[i] = risk_i
 
-        S0_cumsum[i] = a * S0_cumsum[i - 1] + risk_i
+        s0 *= a
+        s0_compensation *= a
+        s0, s0_compensation = neumaier_add(s0, s0_compensation, risk_i)
+        S0_cumsum[i] = s0 + s0_compensation
 
         for j in range(k):
             wX_ij = X[i, j] * risk_i
@@ -183,6 +190,7 @@ def _compute_score_fisher_loglik(
     # Filter to event blocks only.
     # loop over time blocks, accumulate score and Fisher info
     loglik = 0.0
+    compensation = 0.0
     n_blocks = block_ends.shape[0]
     for block in range(n_blocks):
         d = block_d[block]
@@ -200,7 +208,9 @@ def _compute_score_fisher_loglik(
             modified_score[r] += block_s[block, r] - d * x_bar[r]
             total += block_s[block, r] * beta[r]
         # Add the block's scale to undo the scaling exp(eta - c) in the risk-set sum.
-        loglik += total - d * (c_run[end_idx] + np.log(S0))
+        loglik, compensation = neumaier_add(
+            loglik, compensation, total - d * (c_run[end_idx] + np.log(S0))
+        )
 
         # V = S2_events * S0_inv[:, None, None] - x_bar[:, :, None] * x_bar[:, None, :]
         # fisher_info = np.einsum("b,brt->rt", d_events, V)
@@ -210,7 +220,7 @@ def _compute_score_fisher_loglik(
                 val = S2_cumsum[end_idx, r, s] * S0_inv - x_r * x_bar[s]
                 fisher_info[r, s] += d * val
 
-    return loglik
+    return loglik + compensation
 
 
 @njit(fastmath=True, inline="always", cache=True)

@@ -47,6 +47,17 @@ def set_identity(A: NDArray[np.float64]) -> None:
 
 
 @njit(fastmath=False, cache=True)
+def neumaier_add(total: float, compensation: float, term: float) -> tuple[float, float]:
+    """Add term to the compensated sum total + compensation."""
+    new_total = total + term
+    if abs(total) >= abs(term):
+        compensation += (total - new_total) + term
+    else:
+        compensation += (term - new_total) + total
+    return new_total, compensation
+
+
+@njit(fastmath=False, cache=True)
 def step_below_resolution(
     loglik: float, score: NDArray[np.float64], delta: NDArray[np.float64]
 ) -> bool:

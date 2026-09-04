@@ -42,7 +42,7 @@ if NUMBA_AVAILABLE:
 from firthmodels._lrt import constrained_lrt_1df, lrt_result_from_loglik
 from firthmodels._profile_ci import ProfileCIBoundResult, profile_ci_bound
 from firthmodels._solvers import newton_raphson
-from firthmodels._utils import FirthResult, resolve_feature_indices
+from firthmodels._utils import FirthResult, compensated_sum, resolve_feature_indices
 
 
 class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
@@ -1047,7 +1047,8 @@ def compute_logistic_quantities(
             0, ws.eta, out=ws.sqrt_w_aug
         )  # reuse, sqrt_w_aug = log(1 + exp(eta))
         np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
-        loglik = float(sample_weight @ ws.w)
+        np.multiply(sample_weight, ws.w, out=ws.w)
+        loglik = compensated_sum(ws.w)
 
         # score = X'[weights*(y-p)]
         np.subtract(y, ws.p, out=ws.residual)
@@ -1128,7 +1129,8 @@ def compute_logistic_quantities(
     np.multiply(y, ws.eta, out=ws.w)  # reuse, w = y * eta
     np.logaddexp(0, ws.eta, out=ws.sqrt_w_aug)  # reuse, sqrt_w_aug = log(1 + exp(eta))
     np.subtract(ws.w, ws.sqrt_w_aug, out=ws.w)  # reuse, w = y*eta - log(1+exp(eta))
-    loglik = sample_weight @ ws.w + penalty_weight * logdet
+    np.multiply(sample_weight, ws.w, out=ws.w)
+    loglik = compensated_sum(ws.w) + penalty_weight * logdet
 
     # modified score U* = X'[weights*(y-p) + 2*penalty_weight*h*(0.5-p)]
     # residual = sample_weight * (y - p) + 2*penalty_weight*h * (0.5 - p)
