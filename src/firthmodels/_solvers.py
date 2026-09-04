@@ -121,6 +121,9 @@ def newton_raphson(
                         ConvergenceWarning,
                         stacklevel=2,
                     )
+                # q.fisher_info may view a workspace buffer that now holds the
+                # rejected step; recompute at beta
+                q = compute_quantities(beta)
                 return FirthResult(  # step-halving failed, return early
                     beta=beta,
                     loglik=q.loglik,

@@ -367,6 +367,10 @@ def newton_raphson_logistic(
                 step_factor *= 0.5
 
             if not accepted:  # step-halving failed, return early
+                # the workspace holds the rejected step; recompute at beta
+                loglik, status = compute_logistic_quantities(
+                    X, y, beta, sample_weight, offset, workspace, penalty_weight
+                )
                 return (
                     beta,
                     loglik,
