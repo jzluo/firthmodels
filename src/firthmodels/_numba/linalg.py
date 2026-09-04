@@ -46,6 +46,18 @@ def set_identity(A: NDArray[np.float64]) -> None:
         A[i, i] = 1.0
 
 
+@njit(fastmath=False, cache=True)
+def step_below_resolution(
+    loglik: float, score: NDArray[np.float64], delta: NDArray[np.float64]
+) -> bool:
+    """Whether the Newton step's predicted gain 0.5 * score . delta is too small to
+    change loglik in float64."""
+    gain = 0.0
+    for i in range(score.shape[0]):
+        gain += 0.5 * score[i] * delta[i]
+    return gain > 0.0 and loglik + gain == loglik
+
+
 _SYMBOLS = {
     "firth_dsyrk": ("scipy.linalg.cython_blas", "dsyrk"),
     "firth_dgemm": ("scipy.linalg.cython_blas", "dgemm"),

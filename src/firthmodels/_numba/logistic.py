@@ -22,6 +22,7 @@ from firthmodels._numba.linalg import (
     dpotrs,
     dsyrk,
     set_identity,
+    step_below_resolution,
     symmetrize_lower,
 )
 
@@ -325,6 +326,11 @@ def newton_raphson_logistic(
         if iteration == max_iter:
             break
 
+        # skip step-halving when the step can't change loglik in float64
+        skip_halving = max_delta < xtol and step_below_resolution(
+            loglik, modified_score, delta
+        )
+
         if max_delta > max_step:
             scale = max_step / max_delta
             for i in range(k):
@@ -340,7 +346,7 @@ def newton_raphson_logistic(
         if status != 0:
             return beta, loglik, fisher_info_aug, iteration, status
 
-        if loglik_new >= loglik or max_halfstep == 0:
+        if skip_halving or loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
                 beta[i] = beta_new[i]
             loglik = loglik_new
@@ -485,6 +491,10 @@ def constrained_lrt_1df_logistic(
         if iteration == max_iter:
             break
 
+        skip_halving = max_delta < xtol and step_below_resolution(
+            loglik, score_free, delta
+        )
+
         if max_delta > max_step:
             scale = max_step / max_delta
             for i in range(free_k):
@@ -502,7 +512,7 @@ def constrained_lrt_1df_logistic(
         if status != 0:
             return loglik, iteration, status
 
-        if loglik_new >= loglik or max_halfstep == 0:
+        if skip_halving or loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
                 beta[i] = beta_new[i]
             loglik = loglik_new
