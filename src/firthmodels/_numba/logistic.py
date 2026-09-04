@@ -21,7 +21,9 @@ from firthmodels._numba.linalg import (
     dpotrf,
     dpotrs,
     dsyrk,
+    neumaier_add,
     set_identity,
+    step_below_resolution,
     symmetrize_lower,
 )
 
@@ -47,6 +49,21 @@ def log1pexp(x: float) -> float:
     if x > 0.0:
         return x + np.log1p(np.exp(-x))
     return np.log1p(np.exp(x))
+
+
+@njit(fastmath=False, cache=True)
+def weighted_loglik(
+    y: NDArray[np.float64],
+    eta: NDArray[np.float64],
+    sample_weight: NDArray[np.float64],
+) -> float:
+    """Compensated sum of w_i * (y_i * eta_i - log(1 + exp(eta_i)))"""
+    total = 0.0
+    compensation = 0.0
+    for i in range(y.shape[0]):
+        term = sample_weight[i] * (y[i] * eta[i] - log1pexp(eta[i]))
+        total, compensation = neumaier_add(total, compensation, term)
+    return total + compensation
 
 
 @njit(fastmath=False, cache=True)
@@ -127,9 +144,7 @@ def compute_logistic_quantities(
                 fisher_info_aug[i, j] = fisher_info[i, j]
         symmetrize_lower(fisher_info_aug)
 
-        loglik = 0.0
-        for i in range(n):
-            loglik += sample_weight[i] * (y[i] * eta[i] - log1pexp(eta[i]))
+        loglik = weighted_loglik(y, eta, sample_weight)
 
         for i in range(n):
             residual[i] = sample_weight[i] * (y[i] - p[i])
@@ -234,10 +249,7 @@ def compute_logistic_quantities(
     dsyrk(XtW_aug, fisher_info_aug)
     symmetrize_lower(fisher_info_aug)
 
-    loglik = 0.0
-    for i in range(n):
-        loglik += sample_weight[i] * (y[i] * eta[i] - log1pexp(eta[i]))
-    loglik += penalty_weight * logdet
+    loglik = weighted_loglik(y, eta, sample_weight) + penalty_weight * logdet
 
     for i in range(n):
         residual[i] = sample_weight[i] * (y[i] - p[i]) + penalty_scale * h[i] * (
@@ -325,6 +337,11 @@ def newton_raphson_logistic(
         if iteration == max_iter:
             break
 
+        # skip step-halving when the step can't change loglik in float64
+        skip_halving = max_delta < xtol and step_below_resolution(
+            loglik, modified_score, delta
+        )
+
         if max_delta > max_step:
             scale = max_step / max_delta
             for i in range(k):
@@ -340,7 +357,7 @@ def newton_raphson_logistic(
         if status != 0:
             return beta, loglik, fisher_info_aug, iteration, status
 
-        if loglik_new >= loglik or max_halfstep == 0:
+        if skip_halving or loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
                 beta[i] = beta_new[i]
             loglik = loglik_new
@@ -367,6 +384,10 @@ def newton_raphson_logistic(
                 step_factor *= 0.5
 
             if not accepted:  # step-halving failed, return early
+                # the workspace holds the rejected step; recompute at beta
+                loglik, status = compute_logistic_quantities(
+                    X, y, beta, sample_weight, offset, workspace, penalty_weight
+                )
                 return (
                     beta,
                     loglik,
@@ -481,6 +502,10 @@ def constrained_lrt_1df_logistic(
         if iteration == max_iter:
             break
 
+        skip_halving = max_delta < xtol and step_below_resolution(
+            loglik, score_free, delta
+        )
+
         if max_delta > max_step:
             scale = max_step / max_delta
             for i in range(free_k):
@@ -498,7 +523,7 @@ def constrained_lrt_1df_logistic(
         if status != 0:
             return loglik, iteration, status
 
-        if loglik_new >= loglik or max_halfstep == 0:
+        if skip_halving or loglik_new >= loglik or max_halfstep == 0:
             for i in range(k):
                 beta[i] = beta_new[i]
             loglik = loglik_new

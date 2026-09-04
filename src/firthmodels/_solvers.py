@@ -92,6 +92,14 @@ def newton_raphson(
         if iteration == max_iter:
             break
 
+        # skip step-halving when the step can't change loglik in float64
+        predicted_gain = 0.5 * float(q.modified_score @ delta)
+        skip_halving = (
+            max_delta < xtol
+            and predicted_gain > 0.0
+            and q.loglik + predicted_gain == q.loglik
+        )
+
         # clip to max_stepsize
         if max_delta > max_step:
             delta = delta * (max_step / max_delta)
@@ -100,7 +108,7 @@ def newton_raphson(
         beta_new = beta + delta
         q_new = compute_quantities(beta_new)
 
-        if q_new.loglik >= q.loglik or max_halfstep == 0:
+        if skip_halving or q_new.loglik >= q.loglik or max_halfstep == 0:
             beta = beta_new
             q = q_new
         else:
@@ -121,6 +129,9 @@ def newton_raphson(
                         ConvergenceWarning,
                         stacklevel=2,
                     )
+                # q.fisher_info may view a workspace buffer that now holds the
+                # rejected step; recompute at beta
+                q = compute_quantities(beta)
                 return FirthResult(  # step-halving failed, return early
                     beta=beta,
                     loglik=q.loglik,

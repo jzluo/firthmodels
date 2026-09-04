@@ -10,6 +10,7 @@ import scipy.stats
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.estimator_checks import estimator_checks_generator
 
+import firthmodels._solvers
 import firthmodels.logistic
 from firthmodels import FirthLogisticRegression
 from firthmodels._lrt import LRTResult
@@ -346,6 +347,28 @@ class TestFirthLogisticRegression:
         assert np.isnan(result.chi2)
         assert np.isnan(result.pvalue)
         assert np.isnan(result.bse_backcorrected)
+
+    def test_step_below_loglik_resolution_skips_step_halving(self):
+        # the step can't change loglik in float64, and every half-step lowers it
+        def compute_quantities(beta):
+            return firthmodels.logistic.LogisticQuantities(
+                loglik=-1e6 if beta[0] == 0.0 else -1e6 - 1e-9,
+                modified_score=np.array([1e-6 - beta[0]]),
+                fisher_info=np.eye(1),
+            )
+
+        result = firthmodels._solvers.newton_raphson(
+            compute_quantities,
+            n_features=1,
+            max_iter=5,
+            max_step=5.0,
+            max_halfstep=5,
+            gtol=1e-8,
+            xtol=1e-3,
+        )
+
+        assert result.converged
+        assert result.beta[0] == 1e-6
 
     def test_no_warning_when_halfstep_disabled(self):
         """max_halfstep=0 should not produce step-halving warnings."""

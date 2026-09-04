@@ -323,8 +323,8 @@ class TestFirthCoxPH:
 
 class TestNewtonRaphsonCox:
     def test_step_halving_failure_returns_consistent_fisher_info(self):
-        # Dataset chosen to deterministically hit the step-halving failure path.
-        # seed=1 with these parameters triggers failure at iteration 12.
+        # The Newton step uses the unpenalized Fisher information, so a large
+        # penalty weight makes it overshoot and every half-step lowers loglik.
         np.random.seed(1)
         n, k = 10, 2
         X = np.random.randn(n, k) * 3
@@ -343,9 +343,10 @@ class TestNewtonRaphsonCox:
             max_iter=50,
             max_step=5.0,
             max_halfstep=2,
-            gtol=1e-10,
-            xtol=1e-10,
+            gtol=1e-4,
+            xtol=1e-4,
             workspace=workspace.numba_buffers(),
+            penalty_weight=100.0,
         )
         assert status == _STATUS_STEP_HALVING_FAILED
         fisher_info = fisher_info.copy()
@@ -373,6 +374,7 @@ class TestNewtonRaphsonCox:
             term1=term1,
             term23=term23,
             workspace=ref_workspace.numba_buffers(),
+            penalty_weight=100.0,
         )
         assert status == 0
         np.testing.assert_allclose(loglik_ref, loglik, rtol=1e-10)

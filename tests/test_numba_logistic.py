@@ -120,7 +120,8 @@ class TestNewtonRaphsonNumba:
         np.testing.assert_allclose(numba[0], ref.beta, rtol=1e-14)
 
     def test_step_halving_failure_returns_consistent_fisher_info(self):
-        # dataset chosen to deterministically hit the step-halving failure path.
+        # offset=-10 starts the fit far out in the flat tail of the likelihood, so
+        # the first Newton step overshoots and even the half step lowers the loglik.
         X = np.array(
             [
                 [2.04091912],
@@ -134,7 +135,7 @@ class TestNewtonRaphsonNumba:
         )
         y = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0], dtype=np.float64)
         sample_weight = np.ones(6, dtype=np.float64)
-        offset = np.zeros(6, dtype=np.float64)
+        offset = np.full(6, -10.0)
 
         workspace = _Workspace(6, 1)
         beta, loglik, fisher_info, _, status = newton_raphson_logistic(
@@ -143,10 +144,10 @@ class TestNewtonRaphsonNumba:
             sample_weight,
             offset,
             max_iter=25,
-            max_step=5.0,
+            max_step=50.0,
             max_halfstep=1,
-            gtol=1e-12,
-            xtol=1e-12,
+            gtol=1e-4,
+            xtol=1e-4,
             workspace=workspace.numba_buffers(),
         )
         assert status == _STATUS_STEP_HALVING_FAILED

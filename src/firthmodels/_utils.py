@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Literal, Protocol, Sequence
 
@@ -25,6 +26,11 @@ class IterationQuantities(Protocol):
     loglik: float
     modified_score: NDArray[np.float64]
     fisher_info: NDArray[np.float64]
+
+
+def compensated_sum(terms: NDArray[np.float64]) -> float:
+    """math.fsum over 64-term block sums."""
+    return math.fsum(np.add.reduceat(terms, np.arange(0, terms.shape[0], 64)))
 
 
 def resolve_feature_indices(
