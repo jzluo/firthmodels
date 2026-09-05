@@ -92,7 +92,7 @@ exclude=[
 ]
 
 [tool.ruff.lint]
-select = ["I"]
+extend-select = ["I"]
 
 [tool.mypy]
 ignore_missing_imports = true

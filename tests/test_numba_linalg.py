@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from firthmodels import NUMBA_AVAILABLE
+from firthmodels._numba.blas_abi import BLAS_INT_DTYPE
 
 pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available")
 
@@ -10,15 +11,12 @@ if NUMBA_AVAILABLE:
         dgemm,
         dgemv,
         dgetrf,
-        dgetri,
         dgetrs,
         dpotrf,
         dpotri,
         dpotrs,
         dsyrk,
     )
-
-from firthmodels._numba.blas_abi import BLAS_INT_DTYPE
 
 
 class TestBLAS:

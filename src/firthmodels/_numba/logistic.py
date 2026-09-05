@@ -298,7 +298,6 @@ def newton_raphson_logistic(
         modified_score,
     ) = workspace
 
-    n = X.shape[0]
     k = X.shape[1]
     beta = np.zeros(k, dtype=np.float64)
     beta_new = np.zeros(k, dtype=np.float64)
