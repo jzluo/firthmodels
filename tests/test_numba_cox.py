@@ -13,8 +13,6 @@ from firthmodels import NUMBA_AVAILABLE
 
 if NUMBA_AVAILABLE:
     from firthmodels._numba.cox import (
-        _STATUS_LINALG_FAIL,
-        _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         concordance_index,
         newton_raphson_cox,
@@ -26,9 +24,7 @@ if NUMBA_AVAILABLE:
 
 from firthmodels.cox import (
     FirthCoxPH,
-    _concordance_index,
     _CoxPrecomputed,
-    _validate_survival_y,
     _Workspace,
     compute_cox_quantities,
 )

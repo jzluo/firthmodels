@@ -496,8 +496,6 @@ def generate_logistic_section(df: pd.DataFrame, plot_name: str) -> str:
     )
 
     n = int(df["n"].iloc[0])
-    events_lo, events_hi = int(df["events"].min()), int(df["events"].max())
-    epv_lo, epv_hi = df["epv"].min(), df["epv"].max()
     k_lo, k_hi = int(df["k"].iloc[0]), int(df["k"].iloc[-1])
 
     brglm2_rel_gap = (
@@ -585,7 +583,6 @@ def generate_cox_section(df: pd.DataFrame, plot_name: str) -> str:
     )
 
     n = int(df["n"].iloc[0])
-    events = int(df["events"].iloc[0])
     k_lo, k_hi = int(df["k"].iloc[0]), int(df["k"].iloc[-1])
 
     return f"""## Firth Cox proportional hazards

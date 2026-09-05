@@ -12,18 +12,14 @@ from numpy.typing import NDArray
 from firthmodels._numba.blas_abi import BLAS_INT_DTYPE
 from firthmodels._numba.linalg import (
     _alloc_f_order,
-    dgemm,
-    dgemv,
     dgetrf,
     dgetrs,
     dpotrf,
     dpotrs,
     dpstrf,
-    dsyrk,
     neumaier_add,
     set_identity,
     step_below_resolution,
-    symmetrize_lower,
 )
 
 # Solver exit status codes
@@ -865,7 +861,6 @@ def profile_ci_bound_cox(
     n, k = X.shape
     theta = theta_hat.copy()
 
-    beta = np.zeros(k, dtype=np.float64)
     fisher_work = _alloc_f_order(k, k)
     modified_score = np.empty(k, dtype=np.float64)
     x_bar = np.empty(k, dtype=np.float64)

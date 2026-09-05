@@ -19,7 +19,6 @@ pytestmark = pytest.mark.skipif(not NUMBA_AVAILABLE, reason="numba not available
 if NUMBA_AVAILABLE:
     from firthmodels._numba.logistic import (
         _STATUS_CONVERGED,
-        _STATUS_LINALG_FAIL,
         _STATUS_RANK_DEFICIENT,
         _STATUS_STEP_HALVING_FAILED,
         expit,

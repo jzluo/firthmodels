@@ -22,7 +22,7 @@ Example
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -32,7 +32,6 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.special import expit
 
 from firthmodels import FirthLogisticRegression
-from firthmodels.logistic import compute_logistic_quantities
 
 
 class FirthLogit:

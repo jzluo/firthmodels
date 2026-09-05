@@ -47,12 +47,12 @@ class TestFirthLogit:
         X, _ = toy_data
         y = np.array([0, 1, np.nan, 1])
         with pytest.raises(ValueError, match="NaN"):
-            model = FirthLogit(y, X, missing="raise")
+            FirthLogit(y, X, missing="raise")
 
     def test_missing_drop_not_implemented(self, toy_data):
         X, y = toy_data
         with pytest.raises(NotImplementedError):
-            model = FirthLogit(y, X, missing="drop")
+            FirthLogit(y, X, missing="drop")
 
     def test_fit_returns_results(self, toy_data):
         X, y = toy_data
