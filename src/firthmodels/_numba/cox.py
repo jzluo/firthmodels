@@ -926,6 +926,9 @@ def profile_ci_bound_cox(
     step2 = np.empty(k, dtype=np.float64)
     temp = np.empty(k, dtype=np.float64)
 
+    previous_theta = theta.copy()
+    previous_loglik = 0.0
+
     # Appendix steps 4-9: Modified Newton-Raphson
     for iteration in range(max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
@@ -953,14 +956,19 @@ def profile_ci_bound_cox(
         F[idx] = loglik - l_star
 
         # Appendix step 9: check convergence
-        # TODO: the paper checks for relative change in loglik and the coefficients
-        # between iterations. We're checking |loglik-l_star| directly, and the
-        # |scores| of the nuisance parameters.
-        if max_abs(F) <= tol:
-            return theta[idx], _STATUS_CONVERGED, iteration
+        if iteration > 0:
+            loglik_change = abs(loglik - previous_loglik) / (1 + abs(previous_loglik))
+            theta_change = np.max(
+                np.abs(theta - previous_theta) / (1 + np.abs(previous_theta))
+            )
+            if loglik_change <= tol and theta_change <= tol:
+                return theta[idx], _STATUS_CONVERGED, iteration
 
         if iteration == max_iter:
             break
+
+        previous_theta[:] = theta
+        previous_loglik = loglik
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         for i in range(k):

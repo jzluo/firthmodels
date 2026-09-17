@@ -472,7 +472,7 @@ class FirthLogitResults:
         maxiter : int, default 25
             Maximum iterations for profile likelihood CI computation.
             Only used when method='pl'.
-        tol : float, default 1e-4
+        tol : float, default 1e-5
             Convergence tolerance for profile likelihood CI computation.
             Only used when method='pl'.
 
@@ -492,7 +492,7 @@ class FirthLogitResults:
             method = "pl" if self._pl else "wald"
 
         max_iter = kwargs.pop("maxiter", 25)
-        tol = kwargs.pop("tol", 1e-4)
+        tol = kwargs.pop("tol", 1e-5)
         if kwargs:
             raise TypeError(
                 f"conf_int() got unexpected keyword arguments: {list(kwargs.keys())}"

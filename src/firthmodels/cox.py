@@ -493,7 +493,7 @@ class FirthCoxPH(BaseEstimator):
         method: Literal["wald", "pl"] = "wald",
         features: int | str | Sequence[int | str] | None = None,
         max_iter: int = 50,
-        tol: float = 1e-4,
+        tol: float = 1e-5,
     ) -> NDArray[np.float64]:
         """
         Compute confidence intervals for the coefficients. If `method='pl'`, profile
@@ -516,7 +516,7 @@ class FirthCoxPH(BaseEstimator):
             - Sequence[str]: multiple features by name
         max_iter : int, default=50
             Maximum number of iterations per bound (only used for `method='pl'`)
-        tol : float, default=1e-4
+        tol : float, default=1e-5
             Convergence tolerance (only used for `method='pl'`)
 
         Returns

@@ -553,7 +553,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         method: Literal["wald", "pl"] = "wald",
         features: int | str | Sequence[int | str] | None = None,
         max_iter: int = 25,
-        tol: float = 1e-4,
+        tol: float = 1e-5,
     ) -> NDArray[np.float64]:
         """
         Compute confidence intervals for the coefficients. If `method='pl'`, profile
@@ -577,7 +577,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             - None: all features (including intercept if `fit_intercept=True`)
         max_iter : int, default=25
             Maximum number of iterations per bound (only used for `method='pl'`)
-        tol : float, default=1e-4
+        tol : float, default=1e-5
             Convergence tolerance (only used for `method='pl'`)
 
         Returns

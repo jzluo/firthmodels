@@ -48,7 +48,8 @@ def profile_ci_bound(
     max_iter : int
         Maximum iterations.
     tol : float
-        Convergence tolerance.
+        Tolerance for changes in log-likelihood and each coefficient between
+        iterations, scaled by one plus the absolute value at the previous iteration.
     chi2_crit : float
         Chi-squared critical value (e.g., chi2.ppf(0.95, 1) for 95% CI).
     compute_quantities_full : callable
@@ -111,6 +112,9 @@ def profile_ci_bound(
         tangent[other_idx] = dw_db
     theta = theta + h * tangent
 
+    previous_theta = theta.copy()
+    previous_loglik = 0.0
+
     # Appendix steps 4-9: Modified Newton-Raphson
     for iteration in range(max_iter + 1):
         # Appendix step 4: compute score and Hessian at theta(i)
@@ -121,18 +125,23 @@ def profile_ci_bound(
         F[idx] = q.loglik - l_star
 
         # Appendix step 9: check convergence
-        # TODO: the paper checks for relative change in loglik and the coefficients
-        # between iterations. We're checking |loglik-l_star| directly, and the
-        # |scores| of the nuisance parameters.
-        if np.abs(F).max() <= tol:
-            return ProfileCIBoundResult(
-                bound=theta[idx],
-                converged=True,
-                n_iter=iteration,
+        if iteration > 0:
+            loglik_change = abs(q.loglik - previous_loglik) / (1 + abs(previous_loglik))
+            theta_change = np.max(
+                np.abs(theta - previous_theta) / (1 + np.abs(previous_theta))
             )
+            if loglik_change <= tol and theta_change <= tol:
+                return ProfileCIBoundResult(
+                    bound=theta[idx],
+                    converged=True,
+                    n_iter=iteration,
+                )
 
         if iteration == max_iter:
             break
+
+        previous_theta = theta.copy()
+        previous_loglik = q.loglik
 
         # D = d2l/dtheta2 at current theta (Appendix step 4)
         D = -q.fisher_info
