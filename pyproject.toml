@@ -55,8 +55,8 @@ numba = [
 ]
 dev = [
     "formulaic>=1.2.1",
-    "mypy>=1.19.0",
     "pandas>=1.5.3",
+    "pyrefly>=1.4.0",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
@@ -71,8 +71,8 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "formulaic>=1.2.1",
-    "mypy>=1.19.0",
     "pandas>=1.5.3",
+    "pyrefly>=1.4.0",
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "ruff>=0.14.8",
@@ -97,5 +97,6 @@ exclude=[
 [tool.ruff.lint]
 extend-select = ["I"]
 
-[tool.mypy]
-ignore_missing_imports = true
+[tool.pyrefly]
+project-includes = ["src"]
+replace-imports-with-any = ["formulaic.*", "numba.extending", "pandas.*", "scipy.*"]

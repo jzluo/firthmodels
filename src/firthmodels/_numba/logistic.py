@@ -249,6 +249,7 @@ def compute_logistic_quantities(
     dsyrk(XtW_aug, fisher_info_aug)
     symmetrize_lower(fisher_info_aug)
 
+    # pyrefly: ignore[unbound-name]
     loglik = weighted_loglik(y, eta, sample_weight) + penalty_weight * logdet
 
     for i in range(n):
