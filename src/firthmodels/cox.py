@@ -16,7 +16,10 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.linalg.lapack import dpotrf, dpotrs, dpstrf
 from sklearn.base import BaseEstimator
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.utils.validation import check_is_fitted, validate_data
+from sklearn.utils.validation import (
+    check_is_fitted,
+    validate_data,  # pyrefly: ignore[missing-module-attribute]
+)
 
 from firthmodels import NUMBA_AVAILABLE
 
@@ -568,9 +571,8 @@ class FirthCoxPH(BaseEstimator):
 
             D0 = -self._fisher_info  # hessian at MLE
             for idx in indices:
-                for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                for bound_idx, which in enumerate((-1, 1)):  # lower, upper
                     if not computed[idx, bound_idx]:
-                        which = cast(Literal[-1, 1], which)  # mypy -_-
                         if self._resolve_backend() == "numba":
                             bound, converged, iterations = profile_ci_bound_cox(
                                 X=self._precomputed.X,
@@ -843,7 +845,7 @@ def _validate_survival_y(
         # Find which field is bool (event) and which is float (time)
         event_field = time_field = None
         for name in names:
-            dtype = y.dtype.fields[name][0]
+            dtype = y.dtype[name]
             if np.issubdtype(dtype, np.bool_):
                 event_field = name
             elif np.issubdtype(dtype, np.floating):

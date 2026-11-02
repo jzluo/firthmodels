@@ -16,13 +16,16 @@ from scipy.special import expit
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics import accuracy_score
-from sklearn.utils._tags import ClassifierTags, Tags
+from sklearn.utils._tags import (
+    ClassifierTags,  # pyrefly: ignore[missing-module-attribute]
+    Tags,  # pyrefly: ignore[missing-module-attribute]
+)
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils.validation import (
-    _check_sample_weight,
+    _check_sample_weight,  # pyrefly: ignore[missing-module-attribute]
     check_array,
     check_is_fitted,
-    validate_data,
+    validate_data,  # pyrefly: ignore[missing-module-attribute]
 )
 
 from firthmodels import NUMBA_AVAILABLE
@@ -162,7 +165,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         self.backend = backend
 
     def __sklearn_tags__(self) -> Tags:
-        tags = super().__sklearn_tags__()
+        tags = super().__sklearn_tags__()  # pyrefly: ignore[missing-attribute]
         tags.classifier_tags = ClassifierTags()
         tags.classifier_tags.multi_class = False
         return tags
@@ -320,6 +323,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
 
         # === Wald ===
         self._cov = None
+        bse = np.full_like(result.beta, np.nan)
         if not np.all(np.isfinite(result.fisher_info)):
             warnings.warn(
                 "Fisher information matrix is not finite; "
@@ -327,7 +331,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                 RuntimeWarning,
                 stacklevel=2,
             )
-            bse = np.full_like(result.beta, np.nan)
         else:
             L, info = dpotrf(result.fisher_info, lower=1, overwrite_a=0)
             if info == 0:
@@ -344,7 +347,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
                     RuntimeWarning,
                     stacklevel=2,
                 )
-                bse = np.full_like(result.beta, np.nan)
 
         z = result.beta / bse
         pvalues = 2 * scipy.stats.norm.sf(np.abs(z))
@@ -649,9 +651,8 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
             )
             D0 = -compute_quantities_full(theta_hat).fisher_info  # hessian at MLE
             for idx in indices:
-                for bound_idx, which in enumerate([-1, 1]):  # lower, upper
+                for bound_idx, which in enumerate((-1, 1)):  # lower, upper
                     if not computed[idx, bound_idx]:
-                        which = cast(Literal[-1, 1], which)  # mypy -_-
                         if self._resolve_backend() == "numba":
                             bound, status, iterations = profile_ci_bound_logistic(
                                 X=X,
@@ -754,7 +755,7 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         """
         check_is_fitted(self)
         X = validate_data(self, X, dtype=np.float64, reset=False)
-        X = cast(NDArray[np.float64], X)  # for mypy
+        X = cast(NDArray[np.float64], X)
         offset_arr = self._validate_offset(offset, X.shape[0])
         return X @ self.coef_ + self.intercept_ + offset_arr
 
@@ -913,8 +914,6 @@ class FirthLogisticRegression(ClassifierMixin, BaseEstimator):
         # encode y to 0/1
         y = (y == self.classes_[1]).astype(np.float64)
 
-        X = cast(NDArray[np.float64], X)  # for mypy
-        y = cast(NDArray[np.float64], y)
         return X, y
 
     @staticmethod

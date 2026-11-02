@@ -449,7 +449,7 @@ def compute_cox_quantities(
         workspace=workspace,
     )
 
-    loglik += penalty_weight * logdet
+    loglik += penalty_weight * logdet  # pyrefly: ignore[unbound-name]
 
     return loglik, 0  # status success
 
