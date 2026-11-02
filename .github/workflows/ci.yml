@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --frozen
-      - run: uv run pyrefly check --output-format=github
+      - run: uv run --no-sync pyrefly check --output-format=github
 
   test:
     runs-on: ubuntu-latest
