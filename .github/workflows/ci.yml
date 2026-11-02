@@ -45,4 +45,4 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync ${{ matrix.uv-args }}
-      - run: uv run pytest
+      - run: uv run --no-sync pytest
