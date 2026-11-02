@@ -397,7 +397,7 @@ def dorgqr(A: np.ndarray, tau: np.ndarray, work: np.ndarray, k: int) -> int:
 
 
 @njit(cache=True)
-def dpstrf(A: np.ndarray, piv: np.ndarray, tol: float) -> tuple[int, int]:
+def dpstrf(A: np.ndarray, piv: np.ndarray, tol: float | np.floating) -> tuple[int, int]:
     """Pivoted Cholesky: P.T @ A @ P = L @ L.T. Overwrites A with L.
 
     Returns (rank, info)

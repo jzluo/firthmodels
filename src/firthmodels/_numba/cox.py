@@ -410,7 +410,6 @@ def compute_cox_quantities(
         tol = max(1, k) * np.finfo(np.float64).eps * diag_max
 
         piv = np.zeros(k, dtype=BLAS_INT_DTYPE)
-        # pyrefly: ignore[bad-argument-type]
         rank, info = dpstrf(fisher_work, piv, tol)
         if info == 0 and rank == k:
             logdet = 0.0
